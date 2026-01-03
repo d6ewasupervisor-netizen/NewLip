@@ -113,18 +113,20 @@
             const [audioUrl, setAudioUrl] = React.useState(null);
             const [text, setText] = React.useState("Notice the 3D shape of the teeth and the bottom molars.");
             const [voices, setVoices] = React.useState([]);
-            const [selectedVoice, setSelectedVoice] = React.useState("");
 
             // Voice Recording
             const [isRecordingVoice, setIsRecordingVoice] = React.useState(false);
             const voiceRecorderRef = React.useRef(null);
             const voiceChunksRef = React.useRef([]);
 
-            // Custom Voice Controls
-            const [voiceGender, setVoiceGender] = React.useState('female');
-            const [voiceRate, setVoiceRate] = React.useState(1.0); // 0.1 to 10
-            const [voicePitch, setVoicePitch] = React.useState(1.0); // 0 to 2
+            // Custom Voice Profile Controls
+            const [voiceGender, setVoiceGender] = React.useState('male');
+            const [voiceRate, setVoiceRate] = React.useState(0.95); // Speed: 0.1 to 2 (radio announcer slightly slower)
+            const [voicePitch, setVoicePitch] = React.useState(0.9); // 0 to 2 (deeper pitch for male announcer)
             const [voiceVolume, setVoiceVolume] = React.useState(1.0); // 0 to 1
+            const [voiceTimbre, setVoiceTimbre] = React.useState('warm'); // warm, neutral, bright
+            const [voiceAccent, setVoiceAccent] = React.useState('neutral'); // neutral, british, american, australian
+            const [savedVoiceProfiles, setSavedVoiceProfiles] = React.useState([]);
 
             // Params
             const [lipSplit, setLipSplit] = React.useState(0.5);
@@ -295,12 +297,14 @@
                     setLeftEyebrowPoints(data.leftEyebrowPoints || []);
                     setRightEyebrowPoints(data.rightEyebrowPoints || []);
                     setEyePresets(data.eyePresets || ['blink', 'wink_left', 'look_left', 'look_right']);
-                    setVoiceGender(data.voiceGender || 'female');
-                    setVoiceRate(data.voiceRate || 1.0);
-                    setVoicePitch(data.voicePitch || 1.0);
+                    setVoiceGender(data.voiceGender || 'male');
+                    setVoiceRate(data.voiceRate || 0.95);
+                    setVoicePitch(data.voicePitch || 0.9);
                     setVoiceVolume(data.voiceVolume || 1.0);
+                    setVoiceTimbre(data.voiceTimbre || 'warm');
+                    setVoiceAccent(data.voiceAccent || 'neutral');
+                    setSavedVoiceProfiles(data.savedVoiceProfiles || []);
                     setText(data.text || "Notice the 3D shape of the teeth and the bottom molars.");
-                    setSelectedVoice(data.selectedVoice || "");
                     // AudioUrl and image not saved as they are large/blobs
                 }
             }, []);
@@ -310,7 +314,7 @@
                     lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten,
                     splitColor, splitTexture, lipRoll, syllableSnap, sensitivity, smoothing,
                     polyPoints, leftEyePoints, rightEyePoints, leftEyebrowPoints, rightEyebrowPoints,
-                    eyePresets, voiceGender, voiceRate, voicePitch, voiceVolume, text, selectedVoice
+                    eyePresets, voiceGender, voiceRate, voicePitch, voiceVolume, voiceTimbre, voiceAccent, savedVoiceProfiles, text
                 };
                 localStorage.setItem(draftKey, JSON.stringify(data));
                 setStatus("Draft saved!");
@@ -319,6 +323,81 @@
             const clearDraft = () => {
                 localStorage.removeItem(draftKey);
                 setStatus("Draft cleared.");
+            };
+
+            // Voice Profile Management
+            const saveVoiceProfile = (profileName) => {
+                if (!profileName || profileName.trim() === '') {
+                    setStatus("Please enter a profile name");
+                    return;
+                }
+
+                const profile = {
+                    name: profileName.trim(),
+                    gender: voiceGender,
+                    rate: voiceRate,
+                    pitch: voicePitch,
+                    volume: voiceVolume,
+                    timbre: voiceTimbre,
+                    accent: voiceAccent,
+                    timestamp: Date.now()
+                };
+
+                const updatedProfiles = [...savedVoiceProfiles.filter(p => p.name !== profileName.trim()), profile];
+                setSavedVoiceProfiles(updatedProfiles);
+                setStatus(`Voice profile "${profileName}" saved!`);
+
+                // Also save to draft
+                saveDraft();
+            };
+
+            const loadVoiceProfile = (profile) => {
+                setVoiceGender(profile.gender);
+                setVoiceRate(profile.rate);
+                setVoicePitch(profile.pitch);
+                setVoiceVolume(profile.volume);
+                setVoiceTimbre(profile.timbre);
+                setVoiceAccent(profile.accent);
+                setStatus(`Voice profile "${profile.name}" loaded!`);
+            };
+
+            const deleteVoiceProfile = (profileName) => {
+                setSavedVoiceProfiles(savedVoiceProfiles.filter(p => p.name !== profileName));
+                setStatus(`Voice profile "${profileName}" deleted!`);
+            };
+
+            const exportVoiceProfile = (profile) => {
+                const dataStr = JSON.stringify(profile, null, 2);
+                const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(dataBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `voice-profile-${profile.name}.json`;
+                link.click();
+                URL.revokeObjectURL(url);
+                setStatus(`Voice profile "${profile.name}" exported!`);
+            };
+
+            const importVoiceProfile = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const profile = JSON.parse(e.target.result);
+                        if (profile.name && profile.gender && profile.rate !== undefined) {
+                            const updatedProfiles = [...savedVoiceProfiles.filter(p => p.name !== profile.name), profile];
+                            setSavedVoiceProfiles(updatedProfiles);
+                            setStatus(`Voice profile "${profile.name}" imported!`);
+                        } else {
+                            setStatus("Invalid voice profile file");
+                        }
+                    } catch (err) {
+                        setStatus("Error reading voice profile file");
+                    }
+                };
+                reader.readAsText(file);
             };
 
             // Voice Recording
@@ -1514,21 +1593,52 @@
                 if (activeTab === 'tts') {
                     const u = new SpeechSynthesisUtterance(text);
 
-                    // Apply voice selection with gender filter if no specific voice selected
-                    if (selectedVoice) {
-                        const v = voices.find(vx => vx.name === selectedVoice);
-                        if (v) u.voice = v;
-                    } else {
-                        // Filter by gender
-                        const genderVoices = voices.filter(v =>
-                            voiceGender === 'female' ? v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('woman') || !v.name.toLowerCase().includes('male')
-                            : v.name.toLowerCase().includes('male') || v.name.toLowerCase().includes('man')
-                        );
-                        if (genderVoices.length > 0) u.voice = genderVoices[0];
-                    }
+                    // Intelligent voice selection based on profile parameters
+                    const selectBestVoice = () => {
+                        if (voices.length === 0) return null;
+
+                        // Score each voice based on profile parameters
+                        const scoredVoices = voices.map(v => {
+                            let score = 0;
+                            const name = v.name.toLowerCase();
+                            const lang = (v.lang || '').toLowerCase();
+
+                            // Gender matching (highest priority)
+                            if (voiceGender === 'female') {
+                                if (name.includes('female') || name.includes('woman') || name.includes('lady') || name.includes('girl')) score += 100;
+                                else if (!name.includes('male') && !name.includes('man') && !name.includes('boy')) score += 50;
+                            } else {
+                                if (name.includes('male') || name.includes('man') || name.includes('boy')) score += 100;
+                                else if (name.includes('david') || name.includes('james') || name.includes('daniel')) score += 80;
+                            }
+
+                            // Accent matching
+                            if (voiceAccent === 'british' && (lang.includes('gb') || name.includes('british') || name.includes('daniel'))) score += 50;
+                            else if (voiceAccent === 'american' && (lang.includes('us') || name.includes('american'))) score += 50;
+                            else if (voiceAccent === 'australian' && (lang.includes('au') || name.includes('australian'))) score += 50;
+                            else if (voiceAccent === 'neutral' && lang.includes('en')) score += 30;
+
+                            // Timbre preference (based on voice name hints)
+                            if (voiceTimbre === 'warm' && (name.includes('natural') || name.includes('daniel') || name.includes('samantha'))) score += 20;
+                            else if (voiceTimbre === 'bright' && (name.includes('enhanced') || name.includes('premium'))) score += 20;
+                            else if (voiceTimbre === 'neutral') score += 10;
+
+                            // Prefer premium/enhanced voices
+                            if (name.includes('premium') || name.includes('enhanced') || name.includes('natural')) score += 15;
+
+                            return { voice: v, score };
+                        });
+
+                        // Sort by score and return best match
+                        scoredVoices.sort((a, b) => b.score - a.score);
+                        return scoredVoices[0].voice;
+                    };
+
+                    const selectedVoice = selectBestVoice();
+                    if (selectedVoice) u.voice = selectedVoice;
 
                     // Apply voice controls
-                    u.rate = voiceRate; // 0.1 to 10
+                    u.rate = voiceRate; // 0.1 to 2
                     u.pitch = voicePitch; // 0 to 2
                     u.volume = voiceVolume; // 0 to 1
 
@@ -2009,10 +2119,151 @@
                                         <span style={{fontSize: '0.7rem', color: '#888'}}>{(voiceVolume * 100).toFixed(0)}%</span>
                                     </div>
 
-                                    <select style={{marginTop:12, width:'100%', background:'#1a1a1a', color:'#fff', padding:8}} value={selectedVoice} onChange={e=>setSelectedVoice(e.target.value)}>
-                                        <option value="">Auto (Gender-based)</option>
-                                        {voices.map(v=><option key={v.name} value={v.name}>{v.name}</option>)}
-                                    </select>
+                                    <div style={{marginTop: 15}}>
+                                        <label style={{fontSize: '0.8rem', color: '#aaa', marginBottom: 5, display: 'block'}}>Timbre</label>
+                                        <div className="btn-row">
+                                            <button
+                                                className={`btn ${voiceTimbre === 'warm' ? 'btn-primary' : ''}`}
+                                                onClick={() => setVoiceTimbre('warm')}
+                                                style={{flex: 1, fontSize: '0.75rem'}}
+                                            >
+                                                Warm
+                                            </button>
+                                            <button
+                                                className={`btn ${voiceTimbre === 'neutral' ? 'btn-primary' : ''}`}
+                                                onClick={() => setVoiceTimbre('neutral')}
+                                                style={{flex: 1, fontSize: '0.75rem'}}
+                                            >
+                                                Neutral
+                                            </button>
+                                            <button
+                                                className={`btn ${voiceTimbre === 'bright' ? 'btn-primary' : ''}`}
+                                                onClick={() => setVoiceTimbre('bright')}
+                                                style={{flex: 1, fontSize: '0.75rem'}}
+                                            >
+                                                Bright
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div style={{marginTop: 15}}>
+                                        <label style={{fontSize: '0.8rem', color: '#aaa', marginBottom: 5, display: 'block'}}>Accent</label>
+                                        <div className="btn-row" style={{marginBottom: 5}}>
+                                            <button
+                                                className={`btn ${voiceAccent === 'neutral' ? 'btn-primary' : ''}`}
+                                                onClick={() => setVoiceAccent('neutral')}
+                                                style={{flex: 1, fontSize: '0.75rem'}}
+                                            >
+                                                Neutral
+                                            </button>
+                                            <button
+                                                className={`btn ${voiceAccent === 'american' ? 'btn-primary' : ''}`}
+                                                onClick={() => setVoiceAccent('american')}
+                                                style={{flex: 1, fontSize: '0.75rem'}}
+                                            >
+                                                American
+                                            </button>
+                                        </div>
+                                        <div className="btn-row">
+                                            <button
+                                                className={`btn ${voiceAccent === 'british' ? 'btn-primary' : ''}`}
+                                                onClick={() => setVoiceAccent('british')}
+                                                style={{flex: 1, fontSize: '0.75rem'}}
+                                            >
+                                                British
+                                            </button>
+                                            <button
+                                                className={`btn ${voiceAccent === 'australian' ? 'btn-primary' : ''}`}
+                                                onClick={() => setVoiceAccent('australian')}
+                                                style={{flex: 1, fontSize: '0.75rem'}}
+                                            >
+                                                Australian
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <h3 style={{marginTop: 20, fontSize: '0.8rem', borderTop: '1px solid #333', paddingTop: 15}}>Voice Profiles</h3>
+
+                                    <div style={{marginTop: 10}}>
+                                        <div className="btn-row" style={{marginBottom: 10}}>
+                                            <input
+                                                id="profileNameInput"
+                                                type="text"
+                                                placeholder="Profile name..."
+                                                style={{flex: 1, background:'#1a1a1a', color:'#fff', border:'1px solid #333', padding:6, borderRadius:4, fontSize:'0.8rem'}}
+                                            />
+                                            <button
+                                                className="btn btn-primary"
+                                                onClick={() => {
+                                                    const input = document.getElementById('profileNameInput');
+                                                    if (input && input.value) {
+                                                        saveVoiceProfile(input.value);
+                                                        input.value = '';
+                                                    }
+                                                }}
+                                                style={{fontSize: '0.75rem'}}
+                                            >
+                                                Save
+                                            </button>
+                                        </div>
+
+                                        <div style={{marginBottom: 10}}>
+                                            <label htmlFor="importProfileInput" className="btn" style={{fontSize: '0.75rem', cursor: 'pointer', display: 'inline-block', textAlign: 'center'}}>
+                                                Import Profile
+                                            </label>
+                                            <input
+                                                id="importProfileInput"
+                                                type="file"
+                                                accept=".json"
+                                                onChange={importVoiceProfile}
+                                                style={{display: 'none'}}
+                                            />
+                                        </div>
+
+                                        {savedVoiceProfiles.length > 0 && (
+                                            <div style={{maxHeight: '200px', overflowY: 'auto', border: '1px solid #333', borderRadius: 4, padding: 8}}>
+                                                {savedVoiceProfiles.map(profile => (
+                                                    <div key={profile.name} style={{
+                                                        background: '#1a1a1a',
+                                                        padding: 8,
+                                                        marginBottom: 6,
+                                                        borderRadius: 4,
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: 6
+                                                    }}>
+                                                        <div style={{flex: 1, fontSize: '0.8rem'}}>
+                                                            <div style={{fontWeight: 'bold', marginBottom: 2}}>{profile.name}</div>
+                                                            <div style={{fontSize: '0.7rem', color: '#888'}}>
+                                                                {profile.gender} • {profile.accent} • {profile.timbre}
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            className="btn btn-primary"
+                                                            onClick={() => loadVoiceProfile(profile)}
+                                                            style={{fontSize: '0.7rem', padding: '4px 8px'}}
+                                                        >
+                                                            Load
+                                                        </button>
+                                                        <button
+                                                            className="btn"
+                                                            onClick={() => exportVoiceProfile(profile)}
+                                                            style={{fontSize: '0.7rem', padding: '4px 8px'}}
+                                                        >
+                                                            Export
+                                                        </button>
+                                                        <button
+                                                            className="btn btn-danger"
+                                                            onClick={() => deleteVoiceProfile(profile.name)}
+                                                            style={{fontSize: '0.7rem', padding: '4px 8px'}}
+                                                        >
+                                                            ×
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             )}
                         </div>
