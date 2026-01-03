@@ -1,0 +1,1941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lip Sync Pro - 3D Anatomy</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
+    <style>
+        :root { --accent: #ff00ff; --bg: #080808; --panel: #141414; --text: #ccc; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; height: 100vh; overflow: hidden; }
+        .layout { display: grid; grid-template-columns: 1fr 380px; gap: 20px; height: 95vh; max-width: 1900px; margin: 0 auto; }
+        
+        .stage { background: #000; border-radius: 12px; border: 1px solid #333; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+        canvas { max-width: 100%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 0 50px rgba(0,0,0,0.5)); }
+        
+        .controls { background: var(--panel); padding: 25px; border-radius: 12px; border: 1px solid #333; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
+        
+        h1 { font-size: 1.4rem; color: #fff; margin: 0 0 5px 0; border-bottom: 2px solid var(--accent); display: inline-block; padding-bottom: 8px; letter-spacing: 1px; }
+        h3 { font-size: 0.85rem; text-transform: uppercase; color: #666; margin: 5px 0 10px 0; font-weight: 700; letter-spacing: 0.5px; }
+
+        .panel { background: #1f1f1f; padding: 16px; border-radius: 8px; border: 1px solid #2a2a2a; }
+        
+        .slider-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .slider-row label { font-size: 0.8rem; width: 110px; color: #aaa; font-weight: 500; }
+        input[type=range] { flex: 1; accent-color: var(--accent); height: 4px; background: #444; border-radius: 2px; cursor: pointer; }
+        
+        .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s; background: #2a2a2a; color: #fff; font-size: 0.85rem; text-transform: uppercase; min-width: 80px; }
+        .btn:hover { background: #333; color: var(--accent); }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary:hover { background: #d600d6; color: #fff; }
+        .btn-danger { background: #d32f2f; color: #fff; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .tabs { display: flex; background: #222; padding: 4px; border-radius: 6px; margin-bottom: 15px; }
+        .tab { flex: 1; text-align: center; padding: 8px; font-size: 0.85rem; cursor: pointer; color: #888; border-radius: 4px; transition: 0.2s; font-weight: 600; }
+        .tab.active { background: #333; color: #fff; }
+
+        .upload-zone { border: 2px dashed #444; padding: 40px; text-align: center; border-radius: 8px; cursor: pointer; transition: 0.2s; color: #666; }
+        .upload-zone:hover { border-color: var(--accent); color: #fff; background: #111; }
+
+        .overlay-msg { position: absolute; background: rgba(0,0,0,0.9); padding: 20px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; z-index: 20; color: #fff; }
+        .spinner { width: 30px; height: 30px; border: 3px solid #333; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 10px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .hint { font-size: 0.75rem; color: #666; margin-top: 5px; text-align: center; font-style: italic; }
+
+        /* Added for UI refinement */
+        @media (max-width: 1200px) {
+            .layout { grid-template-columns: 1fr; }
+            .controls { order: 1; max-height: 40vh; }
+            .stage { order: 2; height: 50vh; }
+        }
+        .btn:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const App = () => {
+            const [image, setImage] = React.useState(null);
+            const [status, setStatus] = React.useState("Ready");
+            const [modelsLoaded, setModelsLoaded] = React.useState(false);
+            const [isDetecting, setIsDetecting] = React.useState(false);
+            
+            // Vector Mask for mouth
+            const [polyPoints, setPolyPoints] = React.useState([]); 
+            const [draggedPointIndex, setDraggedPointIndex] = React.useState(null);
+            
+            const [manualBoxMode, setManualBoxMode] = React.useState(false);
+            const [isBoxSelecting, setIsBoxSelecting] = React.useState(false);
+            const boxStartRef = React.useRef(null);
+            const [boxRect, setBoxRect] = React.useState(null);
+
+            const [isDraggingPoly, setIsDraggingPoly] = React.useState(false);
+            const polyDragStartRef = React.useRef(null);
+            const polyDragOrigRef = React.useRef(null);
+
+            // Eyes
+            const [leftEyePoints, setLeftEyePoints] = React.useState([]);
+            const [rightEyePoints, setRightEyePoints] = React.useState([]);
+            const [eyeState, setEyeState] = React.useState('normal');
+            const [activeEdit, setActiveEdit] = React.useState('mouth');
+            const [pupilX, setPupilX] = React.useState(0);
+            const [pupilY, setPupilY] = React.useState(0);
+            const [eyeBrightness, setEyeBrightness] = React.useState(0);
+            const [eyeHue, setEyeHue] = React.useState(0);
+            const [eyeSaturation, setEyeSaturation] = React.useState(1);
+            const [randomEyes, setRandomEyes] = React.useState(false);
+            const [eyeSequence, setEyeSequence] = React.useState(''); // e.g., "0:normal,2:blink,3:squint,5:look_left"
+            const [logicalEyes, setLogicalEyes] = React.useState(false);
+
+            // Interaction
+            const [activeTab, setActiveTab] = React.useState('audio');
+            const [isAnimating, setIsAnimating] = React.useState(false);
+            const [recordedVideo, setRecordedVideo] = React.useState(null);
+
+            const [audioUrl, setAudioUrl] = React.useState(null);
+            const [text, setText] = React.useState("Notice the 3D shape of the teeth and the bottom molars.");
+            const [voices, setVoices] = React.useState([]);
+            const [selectedVoice, setSelectedVoice] = React.useState("");
+
+            // Voice Recording
+            const [isRecordingVoice, setIsRecordingVoice] = React.useState(false);
+            const voiceRecorderRef = React.useRef(null);
+            const voiceChunksRef = React.useRef([]);
+
+            // Params
+            const [lipSplit, setLipSplit] = React.useState(0.5);
+            const [lipWidth, setLipWidth] = React.useState(0.85);
+            const [cupidBow, setCupidBow] = React.useState(0.3);
+            const [lipCurve, setLipCurve] = React.useState(0.1);
+            
+            // 3D Anatomy Params
+            const [teethBrightness, setTeethBrightness] = React.useState(0.9);
+            const [teethShade, setTeethShade] = React.useState(0.2); // 0=White, 1=Yellow
+            const [teethVertical, setTeethVertical] = React.useState(0);
+            const [jawGap, setJawGap] = React.useState(0.1); // Spacing between top/bottom teeth
+            const [tongueHeight, setTongueHeight] = React.useState(0.8); // Allowed to go higher
+            const [lipLighten, setLipLighten] = React.useState(0.5);
+            
+            
+            const [splitColor, setSplitColor] = React.useState(0.35);
+            const [splitTexture, setSplitTexture] = React.useState(0.35);
+            const [lipRoll, setLipRoll] = React.useState(0.35);
+            const [syllableSnap, setSyllableSnap] = React.useState(0.5);
+            const [sensitivity, setSensitivity] = React.useState(1.5);
+            const [smoothing, setSmoothing] = React.useState(0.2);
+
+            const canvasRef = React.useRef(null);
+            const imageRef = React.useRef(null);
+            const audioRef = React.useRef(null);
+            const animationFrameRef = React.useRef(null);
+            const originalImageDataRef = React.useRef(null);
+            const mouthTextureRef = React.useRef(null); 
+            const audioContextRef = React.useRef(null);
+            const mediaRecorderRef = React.useRef(null);
+            const chunksRef = React.useRef([]);
+            
+            const params = React.useRef({});
+            const eyeParams = React.useRef({});
+            
+            const draftKey = 'lipSyncDraft';
+
+            const getBounds = (points) => {
+                if(!points || points.length === 0) return {x:0,y:0,width:0,height:0};
+                let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+                points.forEach(p => {
+                    if(p.x < minX) minX = p.x; if(p.x > maxX) maxX = p.x;
+                    if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y;
+                });
+                return { x: Math.floor(minX), y: Math.floor(minY), width: Math.ceil(maxX - minX), height: Math.ceil(maxY - minY) };
+            };
+
+            React.useEffect(() => {
+                params.current = { lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap };
+                eyeParams.current = { pupilX, pupilY, eyeBrightness, eyeHue, eyeSaturation };
+                if (polyPoints.length > 2 && !isAnimating) {
+                    const bounds = getBounds(polyPoints);
+                    generateMouthTexture(bounds.width, bounds.height);
+                    drawOverlay();
+                }
+            }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints, eyeState, pupilX, pupilY, eyeBrightness, eyeHue, eyeSaturation]);
+
+            React.useEffect(() => {
+                const init = async () => {
+                    try {
+                        const URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+                        await Promise.all([
+                            faceapi.nets.tinyFaceDetector.loadFromUri(URL),
+                            faceapi.nets.faceLandmark68Net.loadFromUri(URL)
+                        ]);
+                        setModelsLoaded(true);
+                    } catch(e) { setStatus("AI Failed. Use Manual."); }
+                    const getVoices = () => setVoices(window.speechSynthesis.getVoices());
+                    getVoices(); window.speechSynthesis.onvoiceschanged = getVoices;
+                };
+                init();
+                return () => stopEverything();
+            }, []);
+
+            // Load draft on mount
+            React.useEffect(() => {
+                const saved = localStorage.getItem(draftKey);
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    setLipSplit(data.lipSplit || 0.5);
+                    setLipWidth(data.lipWidth || 0.85);
+                    setCupidBow(data.cupidBow || 0.3);
+                    setLipCurve(data.lipCurve || 0.1);
+                    setTeethBrightness(data.teethBrightness || 0.9);
+                    setTeethShade(data.teethShade || 0.2);
+                    setTeethVertical(data.teethVertical || 0);
+                    setJawGap(data.jawGap || 0.1);
+                    setTongueHeight(data.tongueHeight || 0.8);
+                    setLipLighten(data.lipLighten || 0.5);
+                    setSplitColor(data.splitColor || 0.35);
+                    setSplitTexture(data.splitTexture || 0.35);
+                    setLipRoll(data.lipRoll || 0.35);
+                    setSyllableSnap(data.syllableSnap || 0.5);
+                    setSensitivity(data.sensitivity || 1.5);
+                    setSmoothing(data.smoothing || 0.2);
+                    setPolyPoints(data.polyPoints || []);
+                    setLeftEyePoints(data.leftEyePoints || []);
+                    setRightEyePoints(data.rightEyePoints || []);
+                    setEyeState(data.eyeState || 'normal');
+                    setPupilX(data.pupilX || 0);
+                    setPupilY(data.pupilY || 0);
+                    setEyeBrightness(data.eyeBrightness || 0);
+                    setEyeHue(data.eyeHue || 0);
+                    setEyeSaturation(data.eyeSaturation || 1);
+                    setRandomEyes(data.randomEyes || false);
+                    setEyeSequence(data.eyeSequence || '');
+                    setLogicalEyes(data.logicalEyes || false);
+                    setText(data.text || "Notice the 3D shape of the teeth and the bottom molars.");
+                    setSelectedVoice(data.selectedVoice || "");
+                    // AudioUrl and image not saved as they are large/blobs
+                }
+            }, []);
+
+            const saveDraft = () => {
+                const data = {
+                    lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten,
+                    splitColor, splitTexture, lipRoll, syllableSnap, sensitivity, smoothing,
+                    polyPoints, leftEyePoints, rightEyePoints, eyeState, pupilX, pupilY, eyeBrightness, eyeHue, eyeSaturation, randomEyes, eyeSequence, logicalEyes, text, selectedVoice
+                };
+                localStorage.setItem(draftKey, JSON.stringify(data));
+                setStatus("Draft saved!");
+            };
+
+            const clearDraft = () => {
+                localStorage.removeItem(draftKey);
+                setStatus("Draft cleared.");
+            };
+
+            // Voice Recording
+            const startVoiceRecord = async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    const recorder = new MediaRecorder(stream);
+                    voiceRecorderRef.current = recorder;
+                    voiceChunksRef.current = [];
+                    recorder.ondataavailable = (e) => voiceChunksRef.current.push(e.data);
+                    recorder.onstop = () => {
+                        const blob = new Blob(voiceChunksRef.current, { type: 'audio/webm' });
+                        setAudioUrl(URL.createObjectURL(blob));
+                        setStatus("Voice recorded!");
+                    };
+                    recorder.start();
+                    setIsRecordingVoice(true);
+                } catch (e) {
+                    setStatus("Microphone access denied.");
+                    console.error(e);
+                }
+            };
+
+            const stopVoiceRecord = () => {
+                if (voiceRecorderRef.current) {
+                    voiceRecorderRef.current.stop();
+                    setIsRecordingVoice(false);
+                }
+            };
+
+            // --- INTERACTION ---
+            const getCoords = (e) => {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const scaleX = canvasRef.current.width / rect.width;
+                const scaleY = canvasRef.current.height / rect.height;
+                return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+            };
+
+            const isNearPoint = (p, target, radius=8) => Math.sqrt(Math.pow(p.x - target.x, 2) + Math.pow(p.y - target.y, 2)) < radius;
+
+            const distToSegment = (p, a, b) => {
+                const l2 = Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2);
+                if (l2 === 0) return Math.sqrt(Math.pow(p.x - a.x, 2) + Math.pow(p.y - a.y, 2));
+                let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
+                t = Math.max(0, Math.min(1, t));
+                const proj = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
+                return Math.sqrt(Math.pow(p.x - proj.x, 2) + Math.pow(p.y - proj.y, 2));
+            };
+
+            const normRect = (a, b) => {
+                const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y);
+                const x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y);
+                return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+            };
+
+            const polyFromRect = (r) => {
+                const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+                const pts = [];
+                const n = 12;
+                for (let i = 0; i < n; i++) {
+                    const t = (i / n) * Math.PI * 2;
+                    pts.push({ x: cx + Math.cos(t) * (r.w * 0.5), y: cy + Math.sin(t) * (r.h * 0.5) });
+                }
+                return pts;
+            };
+
+            const drawBoxOverlay = (r) => {
+                drawOverlay(); // restore image + current polygon
+                if (!r) return;
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.save();
+                ctx.strokeStyle = '#00ff99';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 4]);
+                ctx.strokeRect(r.x, r.y, r.w, r.h);
+                ctx.restore();
+            };
+
+            const pointInPoly = (pt, poly) => {
+                if (!poly || poly.length < 3) return false;
+                let inside = false;
+                for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                    const xi = poly[i].x, yi = poly[i].y;
+                    const xj = poly[j].x, yj = poly[j].y;
+                    const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                        (pt.x < (xj - xi) * (pt.y - yi) / ((yj - yi) || 1e-9) + xi);
+                    if (intersect) inside = !inside;
+                }
+                return inside;
+            };
+
+            const getActivePoly = () => {
+                if (activeEdit === 'mouth') return polyPoints;
+                if (activeEdit === 'eyes') return leftEyePoints; // Treat as one, but apply to both
+                return [];
+            };
+
+            const setActivePoly = (newPoints, isLeft = true) => {
+                if (activeEdit === 'mouth') {
+                    setPolyPoints(newPoints);
+                } else if (activeEdit === 'eyes') {
+                    if (isLeft) {
+                        setLeftEyePoints(newPoints);
+                        // Mirror to right eye
+                        const mirrorPoints = newPoints.map(p => ({ x: canvasRef.current.width - p.x, y: p.y })); // Assuming symmetry
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lip Sync Pro - 3D Anatomy</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
+    <style>
+        :root { --accent: #ff00ff; --bg: #080808; --panel: #141414; --text: #ccc; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; height: 100vh; overflow: hidden; }
+        .layout { display: grid; grid-template-columns: 1fr 380px; gap: 20px; height: 95vh; max-width: 1900px; margin: 0 auto; }
+        
+        .stage { background: #000; border-radius: 12px; border: 1px solid #333; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+        canvas { max-width: 100%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 0 50px rgba(0,0,0,0.5)); }
+        
+        .controls { background: var(--panel); padding: 25px; border-radius: 12px; border: 1px solid #333; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
+        
+        h1 { font-size: 1.4rem; color: #fff; margin: 0 0 5px 0; border-bottom: 2px solid var(--accent); display: inline-block; padding-bottom: 8px; letter-spacing: 1px; }
+        h3 { font-size: 0.85rem; text-transform: uppercase; color: #666; margin: 5px 0 10px 0; font-weight: 700; letter-spacing: 0.5px; }
+
+        .panel { background: #1f1f1f; padding: 16px; border-radius: 8px; border: 1px solid #2a2a2a; }
+        
+        .slider-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .slider-row label { font-size: 0.8rem; width: 110px; color: #aaa; font-weight: 500; }
+        input[type=range] { flex: 1; accent-color: var(--accent); height: 4px; background: #444; border-radius: 2px; cursor: pointer; }
+        
+        .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+        .btn { flex: 1; padding: 12px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; transition: 0.2s; background: #2a2a2a; color: #fff; font-size: 0.85rem; text-transform: uppercase; min-width: 80px; }
+        .btn:hover { background: #333; color: var(--accent); }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary:hover { background: #d600d6; color: #fff; }
+        .btn-danger { background: #d32f2f; color: #fff; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .tabs { display: flex; background: #222; padding: 4px; border-radius: 6px; margin-bottom: 15px; }
+        .tab { flex: 1; text-align: center; padding: 8px; font-size: 0.85rem; cursor: pointer; color: #888; border-radius: 4px; transition: 0.2s; font-weight: 600; }
+        .tab.active { background: #333; color: #fff; }
+
+        .upload-zone { border: 2px dashed #444; padding: 40px; text-align: center; border-radius: 8px; cursor: pointer; transition: 0.2s; color: #666; }
+        .upload-zone:hover { border-color: var(--accent); color: #fff; background: #111; }
+
+        .overlay-msg { position: absolute; background: rgba(0,0,0,0.9); padding: 20px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; z-index: 20; color: #fff; }
+        .spinner { width: 30px; height: 30px; border: 3px solid #333; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 10px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .hint { font-size: 0.75rem; color: #666; margin-top: 5px; text-align: center; font-style: italic; }
+
+        /* Added for UI refinement */
+        @media (max-width: 1200px) {
+            .layout { grid-template-columns: 1fr; }
+            .controls { order: 1; max-height: 40vh; }
+            .stage { order: 2; height: 50vh; }
+        }
+        .btn:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const App = () => {
+            const [image, setImage] = React.useState(null);
+            const [status, setStatus] = React.useState("Ready");
+            const [modelsLoaded, setModelsLoaded] = React.useState(false);
+            const [isDetecting, setIsDetecting] = React.useState(false);
+            
+            // Vector Mask for mouth
+            const [polyPoints, setPolyPoints] = React.useState([]); 
+            const [draggedPointIndex, setDraggedPointIndex] = React.useState(null);
+            
+            const [manualBoxMode, setManualBoxMode] = React.useState(false);
+            const [isBoxSelecting, setIsBoxSelecting] = React.useState(false);
+            const boxStartRef = React.useRef(null);
+            const [boxRect, setBoxRect] = React.useState(null);
+
+            const [isDraggingPoly, setIsDraggingPoly] = React.useState(false);
+            const polyDragStartRef = React.useRef(null);
+            const polyDragOrigRef = React.useRef(null);
+
+            // Eyes
+            const [leftEyePoints, setLeftEyePoints] = React.useState([]);
+            const [rightEyePoints, setRightEyePoints] = React.useState([]);
+            const [eyeState, setEyeState] = React.useState('normal');
+            const [activeEdit, setActiveEdit] = React.useState('mouth');
+            const [pupilX, setPupilX] = React.useState(0);
+            const [pupilY, setPupilY] = React.useState(0);
+            const [eyeBrightness, setEyeBrightness] = React.useState(0);
+            const [eyeHue, setEyeHue] = React.useState(0);
+            const [eyeSaturation, setEyeSaturation] = React.useState(1);
+            const [randomEyes, setRandomEyes] = React.useState(false);
+            const [eyeSequence, setEyeSequence] = React.useState(''); // e.g., "0:normal,2:blink,3:squint,5:look_left"
+            const [logicalEyes, setLogicalEyes] = React.useState(false);
+
+            // Interaction
+            const [activeTab, setActiveTab] = React.useState('audio');
+            const [isAnimating, setIsAnimating] = React.useState(false);
+            const [recordedVideo, setRecordedVideo] = React.useState(null);
+
+            const [audioUrl, setAudioUrl] = React.useState(null);
+            const [text, setText] = React.useState("Notice the 3D shape of the teeth and the bottom molars.");
+            const [voices, setVoices] = React.useState([]);
+            const [selectedVoice, setSelectedVoice] = React.useState("");
+
+            // Voice Recording
+            const [isRecordingVoice, setIsRecordingVoice] = React.useState(false);
+            const voiceRecorderRef = React.useRef(null);
+            const voiceChunksRef = React.useRef([]);
+
+            // Params
+            const [lipSplit, setLipSplit] = React.useState(0.5);
+            const [lipWidth, setLipWidth] = React.useState(0.85);
+            const [cupidBow, setCupidBow] = React.useState(0.3);
+            const [lipCurve, setLipCurve] = React.useState(0.1);
+            
+            // 3D Anatomy Params
+            const [teethBrightness, setTeethBrightness] = React.useState(0.9);
+            const [teethShade, setTeethShade] = React.useState(0.2); // 0=White, 1=Yellow
+            const [teethVertical, setTeethVertical] = React.useState(0);
+            const [jawGap, setJawGap] = React.useState(0.1); // Spacing between top/bottom teeth
+            const [tongueHeight, setTongueHeight] = React.useState(0.8); // Allowed to go higher
+            const [lipLighten, setLipLighten] = React.useState(0.5);
+            
+            
+            const [splitColor, setSplitColor] = React.useState(0.35);
+            const [splitTexture, setSplitTexture] = React.useState(0.35);
+            const [lipRoll, setLipRoll] = React.useState(0.35);
+            const [syllableSnap, setSyllableSnap] = React.useState(0.5);
+            const [sensitivity, setSensitivity] = React.useState(1.5);
+            const [smoothing, setSmoothing] = React.useState(0.2);
+
+            const canvasRef = React.useRef(null);
+            const imageRef = React.useRef(null);
+            const audioRef = React.useRef(null);
+            const animationFrameRef = React.useRef(null);
+            const originalImageDataRef = React.useRef(null);
+            const mouthTextureRef = React.useRef(null); 
+            const audioContextRef = React.useRef(null);
+            const mediaRecorderRef = React.useRef(null);
+            const chunksRef = React.useRef([]);
+            
+            const params = React.useRef({});
+            const eyeParams = React.useRef({});
+            
+            const draftKey = 'lipSyncDraft';
+
+            const getBounds = (points) => {
+                if(!points || points.length === 0) return {x:0,y:0,width:0,height:0};
+                let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+                points.forEach(p => {
+                    if(p.x < minX) minX = p.x; if(p.x > maxX) maxX = p.x;
+                    if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y;
+                });
+                return { x: Math.floor(minX), y: Math.floor(minY), width: Math.ceil(maxX - minX), height: Math.ceil(maxY - minY) };
+            };
+
+            React.useEffect(() => {
+                params.current = { lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap };
+                eyeParams.current = { pupilX, pupilY, eyeBrightness, eyeHue, eyeSaturation };
+                if (polyPoints.length > 2 && !isAnimating) {
+                    const bounds = getBounds(polyPoints);
+                    generateMouthTexture(bounds.width, bounds.height);
+                    drawOverlay();
+                }
+            }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints, eyeState, pupilX, pupilY, eyeBrightness, eyeHue, eyeSaturation]);
+
+            React.useEffect(() => {
+                const init = async () => {
+                    try {
+                        const URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+                        await Promise.all([
+                            faceapi.nets.tinyFaceDetector.loadFromUri(URL),
+                            faceapi.nets.faceLandmark68Net.loadFromUri(URL)
+                        ]);
+                        setModelsLoaded(true);
+                    } catch(e) { setStatus("AI Failed. Use Manual."); }
+                    const getVoices = () => setVoices(window.speechSynthesis.getVoices());
+                    getVoices(); window.speechSynthesis.onvoiceschanged = getVoices;
+                };
+                init();
+                return () => stopEverything();
+            }, []);
+
+            // Load draft on mount
+            React.useEffect(() => {
+                const saved = localStorage.getItem(draftKey);
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    setLipSplit(data.lipSplit || 0.5);
+                    setLipWidth(data.lipWidth || 0.85);
+                    setCupidBow(data.cupidBow || 0.3);
+                    setLipCurve(data.lipCurve || 0.1);
+                    setTeethBrightness(data.teethBrightness || 0.9);
+                    setTeethShade(data.teethShade || 0.2);
+                    setTeethVertical(data.teethVertical || 0);
+                    setJawGap(data.jawGap || 0.1);
+                    setTongueHeight(data.tongueHeight || 0.8);
+                    setLipLighten(data.lipLighten || 0.5);
+                    setSplitColor(data.splitColor || 0.35);
+                    setSplitTexture(data.splitTexture || 0.35);
+                    setLipRoll(data.lipRoll || 0.35);
+                    setSyllableSnap(data.syllableSnap || 0.5);
+                    setSensitivity(data.sensitivity || 1.5);
+                    setSmoothing(data.smoothing || 0.2);
+                    setPolyPoints(data.polyPoints || []);
+                    setLeftEyePoints(data.leftEyePoints || []);
+                    setRightEyePoints(data.rightEyePoints || []);
+                    setEyeState(data.eyeState || 'normal');
+                    setPupilX(data.pupilX || 0);
+                    setPupilY(data.pupilY || 0);
+                    setEyeBrightness(data.eyeBrightness || 0);
+                    setEyeHue(data.eyeHue || 0);
+                    setEyeSaturation(data.eyeSaturation || 1);
+                    setRandomEyes(data.randomEyes || false);
+                    setEyeSequence(data.eyeSequence || '');
+                    setLogicalEyes(data.logicalEyes || false);
+                    setText(data.text || "Notice the 3D shape of the teeth and the bottom molars.");
+                    setSelectedVoice(data.selectedVoice || "");
+                    // AudioUrl and image not saved as they are large/blobs
+                }
+            }, []);
+
+            const saveDraft = () => {
+                const data = {
+                    lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten,
+                    splitColor, splitTexture, lipRoll, syllableSnap, sensitivity, smoothing,
+                    polyPoints, leftEyePoints, rightEyePoints, eyeState, pupilX, pupilY, eyeBrightness, eyeHue, eyeSaturation, randomEyes, eyeSequence, logicalEyes, text, selectedVoice
+                };
+                localStorage.setItem(draftKey, JSON.stringify(data));
+                setStatus("Draft saved!");
+            };
+
+            const clearDraft = () => {
+                localStorage.removeItem(draftKey);
+                setStatus("Draft cleared.");
+            };
+
+            // Voice Recording
+            const startVoiceRecord = async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    const recorder = new MediaRecorder(stream);
+                    voiceRecorderRef.current = recorder;
+                    voiceChunksRef.current = [];
+                    recorder.ondataavailable = (e) => voiceChunksRef.current.push(e.data);
+                    recorder.onstop = () => {
+                        const blob = new Blob(voiceChunksRef.current, { type: 'audio/webm' });
+                        setAudioUrl(URL.createObjectURL(blob));
+                        setStatus("Voice recorded!");
+                    };
+                    recorder.start();
+                    setIsRecordingVoice(true);
+                } catch (e) {
+                    setStatus("Microphone access denied.");
+                    console.error(e);
+                }
+            };
+
+            const stopVoiceRecord = () => {
+                if (voiceRecorderRef.current) {
+                    voiceRecorderRef.current.stop();
+                    setIsRecordingVoice(false);
+                }
+            };
+
+            // --- INTERACTION ---
+            const getCoords = (e) => {
+                const rect = canvasRef.current.getBoundingClientRect();
+                const scaleX = canvasRef.current.width / rect.width;
+                const scaleY = canvasRef.current.height / rect.height;
+                return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+            };
+
+            const isNearPoint = (p, target, radius=8) => Math.sqrt(Math.pow(p.x - target.x, 2) + Math.pow(p.y - target.y, 2)) < radius;
+
+            const distToSegment = (p, a, b) => {
+                const l2 = Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2);
+                if (l2 === 0) return Math.sqrt(Math.pow(p.x - a.x, 2) + Math.pow(p.y - a.y, 2));
+                let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
+                t = Math.max(0, Math.min(1, t));
+                const proj = { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
+                return Math.sqrt(Math.pow(p.x - proj.x, 2) + Math.pow(p.y - proj.y, 2));
+            };
+
+            const normRect = (a, b) => {
+                const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y);
+                const x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y);
+                return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+            };
+
+            const polyFromRect = (r) => {
+                const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+                const pts = [];
+                const n = 12;
+                for (let i = 0; i < n; i++) {
+                    const t = (i / n) * Math.PI * 2;
+                    pts.push({ x: cx + Math.cos(t) * (r.w * 0.5), y: cy + Math.sin(t) * (r.h * 0.5) });
+                }
+                return pts;
+            };
+
+            const drawBoxOverlay = (r) => {
+                drawOverlay(); // restore image + current polygon
+                if (!r) return;
+                const ctx = canvasRef.current.getContext('2d');
+                ctx.save();
+                ctx.strokeStyle = '#00ff99';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 4]);
+                ctx.strokeRect(r.x, r.y, r.w, r.h);
+                ctx.restore();
+            };
+
+            const pointInPoly = (pt, poly) => {
+                if (!poly || poly.length < 3) return false;
+                let inside = false;
+                for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                    const xi = poly[i].x, yi = poly[i].y;
+                    const xj = poly[j].x, yj = poly[j].y;
+                    const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+                        (pt.x < (xj - xi) * (pt.y - yi) / ((yj - yi) || 1e-9) + xi);
+                    if (intersect) inside = !inside;
+                }
+                return inside;
+            };
+
+            const getActivePoly = () => {
+                if (activeEdit === 'mouth') return polyPoints;
+                if (activeEdit === 'eyes') return leftEyePoints; // Treat as one, but apply to both
+                return [];
+            };
+
+            const setActivePoly = (newPoints, isLeft = true) => {
+                if (activeEdit === 'mouth') {
+                    setPolyPoints(newPoints);
+                } else if (activeEdit === 'eyes') {
+                    if (isLeft) {
+                        setLeftEyePoints(newPoints);
+                        // Mirror to right eye
+                        const mirrorPoints = newPoints.map(p => ({ x: canvasRef.current.width - p.x, y: p.y })); // Assuming symmetry
+                        setRightEyePoints(mirrorPoints);
+                    } else {
+                        setRightEyePoints(newPoints);
+                        const mirrorPoints = newPoints.map(p => ({ x: canvasRef.current.width - p.x, y: p.y }));
+                        setLeftEyePoints(mirrorPoints);
+                    }
+                }
+            };
+
+            const handleMouseDown = (e) => {
+                if (isAnimating) return;
+                const m = getCoords(e);
+
+                if (manualBoxMode || e.shiftKey) {
+                    setIsBoxSelecting(true);
+                    boxStartRef.current = m;
+                    setBoxRect({ x: m.x, y: m.y, w: 0, h: 0 });
+                    drawBoxOverlay({ x: m.x, y: m.y, w: 0, h: 0 });
+                    return;
+                }
+
+                const activePoly = getActivePoly();
+                const idx = activePoly.findIndex(p => isNearPoint(p, m));
+                if (idx !== -1) { setDraggedPointIndex(idx); return; }
+
+                if (activePoly.length > 2 && pointInPoly(m, activePoly)) {
+                    setIsDraggingPoly(true);
+                    polyDragStartRef.current = m;
+                    polyDragOrigRef.current = activePoly.map(p => ({ ...p }));
+                    return;
+                }
+            };
+
+            const handleMouseMove = (e) => {
+                const m = getCoords(e);
+
+                if (isBoxSelecting && boxStartRef.current) {
+                    const r = normRect(boxStartRef.current, m);
+                    setBoxRect(r);
+                    drawBoxOverlay(r);
+                    return;
+                }
+
+                if (isDraggingPoly && polyDragStartRef.current && polyDragOrigRef.current) {
+                    const dx = m.x - polyDragStartRef.current.x;
+                    const dy = m.y - polyDragStartRef.current.y;
+                    setActivePoly(polyDragOrigRef.current.map(p => ({ x: p.x + dx, y: p.y + dy })));
+                    return;
+                }
+
+                if (draggedPointIndex !== null) {
+                    const newPoints = [...getActivePoly()];
+                    newPoints[draggedPointIndex] = m;
+                    setActivePoly(newPoints);
+                    return;
+                }
+
+                const activePoly = getActivePoly();
+                let cursor = 'default';
+                if (activePoly.some(p => isNearPoint(p, m))) cursor = 'move';
+                else if (activePoly.length > 2 && pointInPoly(m, activePoly)) cursor = isDraggingPoly ? 'grabbing' : 'grab';
+                else {
+                    for (let i = 0; i < activePoly.length; i++) {
+                        const p1 = activePoly[i];
+                        const p2 = activePoly[(i + 1) % activePoly.length];
+                        if (distToSegment(m, p1, p2) < 5) cursor = 'copy';
+                    }
+                }
+                canvasRef.current.style.cursor = cursor;
+            };
+
+            const handleMouseUp = () => {
+                if (isBoxSelecting && boxStartRef.current && boxRect) {
+                    setIsBoxSelecting(false);
+                    boxStartRef.current = null;
+
+                    if (boxRect.w > 10 && boxRect.h > 10) {
+                        const pts = polyFromRect(boxRect);
+                        setActivePoly(pts);
+                        setStatus("Manual selection applied. Refine points or start animation.");
+                        drawOverlay();
+                    }
+                    setBoxRect(null);
+                    setManualBoxMode(false);
+                    return;
+                }
+
+                setDraggedPointIndex(null);
+                setIsDraggingPoly(false);
+                polyDragStartRef.current = null;
+                polyDragOrigRef.current = null;
+            };
+
+            const handleDoubleClick = (e) => {
+                if(isAnimating) return;
+                const m = getCoords(e);
+                const activePoly = getActivePoly();
+                const idx = activePoly.findIndex(p => isNearPoint(p, m));
+                if (idx !== -1) {
+                    if (activePoly.length > 3) setActivePoly(activePoly.filter((_, i) => i !== idx));
+                    return;
+                }
+                for (let i=0; i<activePoly.length; i++) {
+                    const p1 = activePoly[i];
+                    const p2 = activePoly[(i+1)%activePoly.length];
+                    if (distToSegment(m, p1, p2) < 5) {
+                        const newPoints = [...activePoly];
+                        newPoints.splice(i+1, 0, m);
+                        setActivePoly(newPoints);
+                        return;
+                    }
+                }
+            };
+
+            // Parse eye sequence
+            const parseEyeSequence = (seq) => {
+                const actions = [];
+                seq.split(',').forEach(s => {
+                    const [time, action] = s.trim().split(':');
+                    if (time && action) actions.push({ time: parseFloat(time), action });
+                });
+                return actions;
+            };
+
+            // --- 3D DENTAL ENGINE ---
+            const generateMouthTexture = (w, h) => {
+                if(w<1 || h<1) return;
+                const cvs = document.createElement('canvas'); cvs.width = w; cvs.height = h;
+                const ctx = cvs.getContext('2d');
+                const cx = w / 2; const cy = h * params.current.lipSplit; 
+
+                // 1. THROAT (Depth Gradient)
+                const throat = ctx.createRadialGradient(cx, cy, 0, cx, cy, w * 0.8);
+                throat.addColorStop(0, '#0a0000'); 
+                throat.addColorStop(0.5, '#200505'); 
+                throat.addColorStop(1, '#3a1010'); 
+                ctx.fillStyle = throat; ctx.fillRect(0, 0, w, h);
+
+                // 2. TONGUE (High Rise)
+                // Use the Tongue Height slider to determine top of tongue
+                // Slider 0.0 = low (floor), 1.0 = high (roof)
+                const tongueTop = h - (h * 0.8 * params.current.tongueHeight); 
+                const tongueW = w * 0.55;
+                
+                const tongue = ctx.createRadialGradient(cx, h, 0, cx, h, tongueW);
+                tongue.addColorStop(0, '#c04a4a'); // Pinkish Red
+                tongue.addColorStop(0.8, '#5e1919'); // Dark sides
+                ctx.fillStyle = tongue; 
+                ctx.beginPath();
+                // Draw tongue hump
+                ctx.ellipse(cx, h + (h*0.1), tongueW, (h - tongueTop) + (h*0.1), 0, 0, Math.PI * 2);
+                ctx.fill();
+                // Tongue Center Crease
+                ctx.strokeStyle = 'rgba(80,0,0,0.1)'; ctx.lineWidth = 4;
+                ctx.beginPath(); ctx.moveTo(cx, tongueTop + 10); ctx.lineTo(cx, h); ctx.stroke();
+
+                // 3. BOTTOM MOLARS (The Depth Illusion)
+                // We draw faint, dark shapes on the sides of the jaw
+                const molarY = h * 0.7; // Lower jaw line
+                const molarW = w * 0.2;
+                ctx.fillStyle = '#2a1a1a'; // Dark tooth color
+                // Left Molar
+                ctx.beginPath(); ctx.ellipse(cx - w*0.35, molarY, molarW, h*0.1, 0, 0, Math.PI*2); ctx.fill();
+                // Right Molar
+                ctx.beginPath(); ctx.ellipse(cx + w*0.35, molarY, molarW, h*0.1, 0, 0, Math.PI*2); ctx.fill();
+                // Add shading to push them back
+                const shadowOverlay = ctx.createLinearGradient(0,0,0,h);
+                shadowOverlay.addColorStop(0, 'rgba(0,0,0,0.5)'); 
+                shadowOverlay.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = shadowOverlay; ctx.fillRect(0,0,w,h);
+
+                // 4. TOP TEETH (3D Enamel Shader)
+                const bright = Math.floor(255 * params.current.teethBrightness);
+                // Calculate tint based on Shade slider (0=White, 1=Yellow)
+                const shade = params.current.teethShade;
+                const r = bright;
+                const g = Math.floor(bright * (1 - (shade * 0.1))); // Less Green = Redder
+                const b = Math.floor(bright * (1 - (shade * 0.3))); // Less Blue = Yellower
+                
+                const toothBase = `rgb(${r},${g},${b})`;
+                const toothShadow = `rgb(${r-60},${g-60},${b-70})`;
+                const toothTip = `rgba(${r+20},${g+20},${b+40},0.6)`; // Bluish translucent tip
+
+                const teethOffset = h * params.current.teethVertical; 
+                const jawGap = h * (0.3 - params.current.jawGap);
+                const teethY = cy - jawGap + teethOffset; 
+                
+                const teethH = h * 0.18; 
+                const teethW = w * 0.7 * params.current.lipWidth; // Match width to lips
+                
+                // Gum Shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); 
+                ctx.ellipse(cx, teethY - teethH, teethW/2, teethH/2, 0, 0, Math.PI*2); ctx.fill();
+
+                const toothCount = 6; const startX = cx - (teethW / 2); const totalW = teethW;
+                
+                // Shadow Blur for "No Outlines" look
+                ctx.shadowColor = "rgba(0,0,0,0.4)";
+                ctx.shadowBlur = 4;
+
+                for(let i=0; i<toothCount; i++) {
+                    let relW = 1; if (i === 0 || i === 5) relW = 0.85; if (i === 1 || i === 4) relW = 0.85; if (i === 2 || i === 3) relW = 1.1; 
+                    const unitW = totalW / 5.7; const tW = unitW * relW;
+                    let tX = startX;
+                    if(i>0) tX += (unitW * 0.85); if(i>1) tX += (unitW * 0.85); if(i>2) tX += (unitW * 1.1); if(i>3) tX += (unitW * 1.1); if(i>4) tX += (unitW * 0.85);
+                    
+                    const dist = Math.abs(i - 2.5); const curveY = dist * (h * 0.015);
+                    const tTop = teethY - teethH - curveY; const tBot = teethY - curveY;
+                    
+                    // 3D Gradient
+                    const grad = ctx.createLinearGradient(tX, tTop, tX, tBot);
+                    grad.addColorStop(0, toothShadow); // Root
+                    grad.addColorStop(0.3, toothBase); // Body
+                    grad.addColorStop(0.8, toothBase); 
+                    grad.addColorStop(1, toothTip); // Enamel Tip
+                    ctx.fillStyle = grad; 
+                    
+                    ctx.beginPath(); 
+                    // Round Top
+                    ctx.moveTo(tX + 2, tBot); 
+                    ctx.lineTo(tX + 1, tTop + 5);
+                    ctx.quadraticCurveTo(tX + tW/2, tTop - 2, tX + tW - 1, tTop + 5);
+                    // Square Bottom
+                    ctx.lineTo(tX + tW - 2, tBot); 
+                    ctx.lineTo(tX + 2, tBot); 
+                    ctx.fill();
+                    
+                    // Specular Highlight (The "Wet" Look)
+                    ctx.shadowBlur = 0; // Turn off shadow for highlight
+                    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                    ctx.beginPath();
+                    ctx.ellipse(tX + tW*0.3, tTop + teethH*0.4, tW*0.2, teethH*0.15, 0, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.shadowBlur = 4; // Turn back on
+                }
+                ctx.shadowBlur = 0; // Reset
+                mouthTextureRef.current = ctx.getImageData(0, 0, w, h).data;
+            };
+
+            const processFrame = (openAmount, ctx, bounds, mouthBuffer, maskData) => {
+                if (!originalImageDataRef.current) return;
+
+                const currentImg = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
+                const dst = currentImg.data;
+                const innerMouth = mouthTextureRef.current;
+
+                const w = bounds.width; const h = bounds.height;
+                const cx = w / 2;
+                const activeWidthRatio = params.current.lipWidth;
+                const baseSplitY = h * params.current.lipSplit;
+
+                // Soft Edge: fade motion to zero at the top of the selection (prevents hard line near the nose)
+                const softEdgePx = Math.max(10, Math.round(h * 0.18));
+                const smooth01 = (t) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+
+                const rollPx = Math.max(0, Math.floor((params.current.lipRoll || 0) * 12));
+                const rollStrength = (params.current.lipRoll || 0);
+
+                const splitTex = (params.current.splitTexture || 0);
+                const splitCol = (params.current.splitColor || 0);
+
+                for (let x = 0; x < w; x++) {
+                    const nx = (x - cx) / (w * activeWidthRatio / 2);
+
+                    // Wave Logic
+                    const mainCurve = (nx * nx) * params.current.lipCurve * (h * 0.1);
+                    const bow = Math.cos(nx * Math.PI * 2.5) * params.current.cupidBow * (h * 0.05);
+                    const bowFaded = bow * Math.max(0, 1 - Math.abs(nx * 1.5));
+                    const localSplitY = baseSplitY - mainCurve - bowFaded;
+
+                    const curve = (Math.abs(nx) >= 1) ? 0 : Math.cos(nx * (Math.PI / 2));
+                    const shift = Math.floor(openAmount * curve);
+
+                    if (shift > 0) {
+                        let topLipY = Math.floor(localSplitY - (shift * 0.3));
+                        let bottomLipY = Math.floor(localSplitY + (shift * 0.7));
+
+                        // Jaw Gap: higher slider value = teeth closer (shrink interior opening)
+                        const jawClose01 = Math.min(1, Math.max(0, (params.current.jawGap || 0) / 0.3));
+                        const jawClosePx = Math.round(jawClose01 * (h * 0.06 + 6));
+                        topLipY += jawClosePx;
+                        bottomLipY -= jawClosePx;
+
+                        // Consonant articulation press (strongest at center)
+                        const art = params.current.articulation || 0;
+                        const snap = params.current.syllableSnap || 0;
+                        const centerW = Math.max(0, 1 - Math.abs(nx));
+                        const pressPx = Math.round(art * centerW * (2 + 10 * snap));
+                        topLipY += pressPx;
+                        bottomLipY -= pressPx;
+
+                        if (bottomLipY <= topLipY + 2) bottomLipY = topLipY + 2;
+
+                        for (let y = 0; y < h; y++) {
+                            const idx = (y * w + x) * 4;
+                            if (maskData[idx + 3] === 0) continue;
+
+                            // Mouth interior
+                            if (y > topLipY && y < bottomLipY) {
+                                if (innerMouth[idx + 3] > 0) {
+                                    dst[idx] = innerMouth[idx];
+                                    dst[idx + 1] = innerMouth[idx + 1];
+                                    dst[idx + 2] = innerMouth[idx + 2];
+                                    dst[idx + 3] = 255;
+                                }
+                                continue;
+                            }
+
+                            // Lips / surrounding (warped sampling)
+                            let srcY = y; let isLipEdge = false;
+
+                            if (y <= topLipY) {
+                                srcY = y + (shift * 0.3);
+                                if (srcY >= localSplitY - 3) isLipEdge = true;
+                            } else if (y >= bottomLipY) {
+                                const distFromChin = (y - bottomLipY);
+                                const jawFalloff = Math.max(0, 1 - (distFromChin / (h * 0.6)));
+                                srcY = y - (shift * 0.7 * 1.3 * jawFalloff);
+                                if (srcY <= localSplitY + 3) isLipEdge = true;
+                            }
+
+                            // Pin a thin band around the split so the wet line doesn't wobble
+                            const clampBand = 1 + Math.round(splitTex * 2);
+                            if (isLipEdge && Math.abs(y - localSplitY) <= clampBand) srcY = y;
+
+                            // Sub-pixel sampling (linear interp) to remove 1px jitter
+                            if (srcY >= 0 && srcY < h - 1) {
+                                const y0 = Math.floor(srcY);
+                                const t = srcY - y0;
+
+                                const i0 = (y0 * w + x) * 4;
+                                const i1 = ((y0 + 1) * w + x) * 4;
+
+                                const a0 = mouthBuffer[i0 + 3], a1 = mouthBuffer[i1 + 3];
+                                const a = a0 * (1 - t) + a1 * t;
+                                if (a <= 20) continue;
+
+                                let r = Math.round(mouthBuffer[i0] * (1 - t) + mouthBuffer[i1] * t);
+                                let g = Math.round(mouthBuffer[i0 + 1] * (1 - t) + mouthBuffer[i1 + 1] * t);
+                                let b = Math.round(mouthBuffer[i0 + 2] * (1 - t) + mouthBuffer[i1 + 2] * t);
+
+                                // --- Lip Roll: wrap texture into the inner edge near the split ---
+                                if (rollPx > 0 && isLipEdge && openAmount > 2) {
+                                    const edgeDist = Math.abs(srcY - localSplitY);
+                                    if (edgeDist <= rollPx) {
+                                        const tt = rollStrength * (1 - edgeDist / (rollPx + 1e-9));
+                                        const dir = (srcY < localSplitY) ? -1 : 1;
+                                        const rollSrcY = Math.round(srcY + dir * rollPx);
+
+                                        if (rollSrcY >= 0 && rollSrcY < h) {
+                                            const rollIdx = (rollSrcY * w + x) * 4;
+                                            if (mouthBuffer[rollIdx + 3] > 20) {
+                                                const rr = mouthBuffer[rollIdx];
+                                                const gg = mouthBuffer[rollIdx + 1];
+                                                const bb = mouthBuffer[rollIdx + 2];
+
+                                                const shade = 1 - (tt * 0.12);
+                                                r = Math.round((r * (1 - tt) + rr * tt) * shade);
+                                                g = Math.round((g * (1 - tt) + gg * tt) * shade);
+                                                b = Math.round((b * (1 - tt) + bb * tt) * shade);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (isLipEdge && openAmount > 2) {
+                                    // Lip brighten (existing)
+                                    const boost = params.current.lipLighten * 60;
+
+                                    // Split Color tint (pinned to the split)
+                                    const edge = Math.max(0, 1 - (Math.abs(y - localSplitY) / 3));
+                                    const tcol = splitCol * edge;
+                                    r = Math.min(255, Math.max(0, r + 40 * tcol));
+                                    g = Math.min(255, Math.max(0, g - 10 * tcol));
+                                    b = Math.min(255, Math.max(0, b - 18 * tcol));
+
+                                    // Split Texture: micro-contrast + wet line (pinned to the split)
+                                    if (splitTex > 0) {
+                                        const dir = (y < localSplitY) ? -1 : 1;
+
+                                        const yA = Math.max(0, Math.min(h - 1, y + dir * 1));
+                                        const yB = Math.max(0, Math.min(h - 1, y - dir * 1));
+
+                                        const aIdx = (yA * w + x) * 4;
+                                        const bIdx = (yB * w + x) * 4;
+
+                                        const la = (mouthBuffer[aIdx] * 0.299 + mouthBuffer[aIdx + 1] * 0.587 + mouthBuffer[aIdx + 2] * 0.114);
+                                        const lb = (mouthBuffer[bIdx] * 0.299 + mouthBuffer[bIdx + 1] * 0.587 + mouthBuffer[bIdx + 2] * 0.114);
+
+                                        const contrast = (la - lb) / 255;
+                                        const k = splitTex * 0.35;
+
+                                        r = Math.min(255, Math.max(0, r + contrast * 60 * k));
+                                        g = Math.min(255, Math.max(0, g + contrast * 45 * k));
+                                        b = Math.min(255, Math.max(0, b + contrast * 35 * k));
+
+                                        const edgeDistY = Math.abs(y - localSplitY);
+                                        const spec = Math.max(0, 1 - edgeDistY / 1.6) * splitTex * 22;
+
+                                        r = Math.min(255, r + spec);
+                                        g = Math.min(255, g + spec * 0.9);
+                                        b = Math.min(255, b + spec * 0.8);
+                                    }
+
+                                    r = Math.min(255, r + boost);
+                                    g = Math.min(255, g + boost);
+                                    b = Math.min(255, b + boost);
+                                }
+
+                                dst[idx] = r;
+                                dst[idx + 1] = g;
+                                dst[idx + 2] = b;
+                                dst[idx + 3] = 255;
+                            }
+                        }
+                    }
+                }
+
+                ctx.putImageData(currentImg, bounds.x, bounds.y);
+            };
+
+            const rgbToHsl = (r, g, b) => {
+                r /= 255; g /= 255; b /= 255;
+                const max = Math.max(r, g, b), min = Math.min(r, g, b);
+                let h, s, l = (max + min) / 2;
+                if (max === min) {
+                    h = s = 0;
+                } else {
+                    const d = max - min;
+                    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                    switch (max) {
+                        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                        case g: h = (b - r) / d + 2; break;
+                        case b: h = (r - g) / d + 4; break;
+                    }
+                    h /= 6;
+                }
+                return [h, s, l];
+            };
+
+            const hslToRgb = (h, s, l) => {
+                let r, g, b;
+                if (s === 0) {
+                    r = g = b = l;
+                } else {
+                    const hue2rgb = (p, q, t) => {
+                        if (t < 0) t += 1;
+                        if (t > 1) t -= 1;
+                        if (t < 1/6) return p + (q - p) * 6 * t;
+                        if (t < 1/2) return q;
+                        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                        return p;
+                    };
+                    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                    const p = 2 * l - q;
+                    r = hue2rgb(p, q, h + 1/3);
+                    g = hue2rgb(p, q, h);
+                    b = hue2rgb(p, q, h - 1/3);
+                }
+                return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+            };
+
+            const processEyeFrame = (eyeOpen, ctx, bounds, eyeBuffer, maskData, currentPupilX, currentPupilY, rollAngle = 0) => {
+                if (!originalImageDataRef.current || bounds.width < 1 || bounds.height < 1) return;
+
+                const currentImg = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
+                const dst = currentImg.data;
+
+                const w = bounds.width; const h = bounds.height;
+                const cx = w / 2; const cy = h / 2;
+                const baseSplitY = h * 0.5; // Eyes split horizontally
+
+                // For eyes, we mainly warp the upper lid down for closing/squinting
+                let maxClose = h * 0.4;
+                let closeAmount = Math.max(0, (1 - eyeOpen) * maxClose);
+
+                if (eyeState === 'close') closeAmount = maxClose;
+                if (eyeState === 'wide') closeAmount = -maxClose * 0.5;
+                if (eyeState === 'roll') {
+                    // For roll, slight close and pupil rotation
+                    closeAmount = maxClose * 0.2;
+                }
+
+                for (let x = 0; x < w; x++) {
+                    const nx = (x - cx) / (w / 2);
+                    const curve = Math.cos(nx * (Math.PI / 2));
+
+                    const shift = Math.floor(closeAmount * curve);
+
+                    for (let y = 0; y < h; y++) {
+                        const idx = (y * w + x) * 4;
+                        if (maskData[idx + 3] === 0) continue;
+
+                        let srcY = y;
+                        let isLidEdge = false;
+
+                        if (y < baseSplitY) {
+                            // Upper lid moves down for close, up for wide
+                            srcY = y - shift;
+                            if (srcY < baseSplitY - Math.abs(shift) - 1) isLidEdge = true;
+                        } else {
+                            // Lower lid slight movement
+                            if (closeAmount > 0) srcY = y + (shift * 0.3);
+                            else if (closeAmount < 0) srcY = y + (shift * 0.5); // Open lower too for wide
+                        }
+
+                        if (srcY < 0) srcY = 0;
+                        if (srcY >= h) srcY = h - 1;
+
+                        const y0 = Math.floor(srcY);
+                        const t = srcY - y0;
+
+                        const i0 = (y0 * w + x) * 4;
+                        const i1 = Math.min((y0 + 1) * w * 4, eyeBuffer.length - 4);
+
+                        let r = Math.round(eyeBuffer[i0] * (1 - t) + eyeBuffer[i1] * t);
+                        let g = Math.round(eyeBuffer[i0 + 1] * (1 - t) + eyeBuffer[i1 + 1] * t);
+                        let b = Math.round(eyeBuffer[i0 + 2] * (1 - t) + eyeBuffer[i1 + 2] * t);
+
+                        // Apply color filter
+                        let [hslH, hslS, hslL] = rgbToHsl(r, g, b);
+                        hslH = (hslH + eyeParams.current.eyeHue / 360) % 1;
+                        hslS *= eyeParams.current.eyeSaturation;
+                        hslL += eyeParams.current.eyeBrightness / 100;
+                        hslL = Math.max(0, Math.min(1, hslL));
+                        hslS = Math.max(0, Math.min(1, hslS));
+                        [r, g, b] = hslToRgb(hslH, hslS, hslL);
+
+                        dst[idx] = r;
+                        dst[idx + 1] = g;
+                        dst[idx + 2] = b;
+                        dst[idx + 3] = 255;
+                    }
+                }
+
+                // Draw pupil
+                const pupilRadius = Math.min(w, h) * 0.15;
+                let pupilCx = cx + currentPupilX * (w / 4);
+                let pupilCy = cy + currentPupilY * (h / 4);
+                if (eyeState === 'roll') {
+                    // Rotate pupil position
+                    const angle = rollAngle * Math.PI / 180;
+                    const dx = pupilCx - cx;
+                    const dy = pupilCy - cy;
+                    pupilCx = cx + dx * Math.cos(angle) - dy * Math.sin(angle);
+                    pupilCy = cy + dx * Math.sin(angle) + dy * Math.cos(angle);
+                }
+                const tempCvs = document.createElement('canvas');
+                tempCvs.width = w; tempCvs.height = h;
+                const tempCtx = tempCvs.getContext('2d');
+                tempCtx.putImageData(currentImg, 0, 0);
+                tempCtx.fillStyle = 'black';
+                tempCtx.beginPath();
+                tempCtx.arc(pupilCx, pupilCy, pupilRadius, 0, Math.PI * 2);
+                tempCtx.fill();
+                const withPupil = tempCtx.getImageData(0, 0, w, h);
+                for (let i = 0; i < dst.length; i += 4) {
+                    if (withPupil.data[i + 3] > 0) {
+                        dst[i] = withPupil.data[i];
+                        dst[i + 1] = withPupil.data[i + 1];
+                        dst[i + 2] = withPupil.data[i + 2];
+                    }
+                }
+
+                ctx.putImageData(currentImg, bounds.x, bounds.y);
+            };
+
+            const startAnimation = async () => {
+                if (polyPoints.length < 3) return;
+                const bounds = getBounds(polyPoints);
+                const leftEyeBounds = getBounds(leftEyePoints);
+                const rightEyeBounds = getBounds(rightEyePoints);
+                const ctx = canvasRef.current.getContext('2d');
+                
+                const maskCvs = document.createElement('canvas');
+                maskCvs.width = bounds.width; maskCvs.height = bounds.height;
+                const mCtx = maskCvs.getContext('2d');
+                mCtx.beginPath();
+                mCtx.moveTo(polyPoints[0].x - bounds.x, polyPoints[0].y - bounds.y);
+                for(let i=1; i<polyPoints.length; i++) mCtx.lineTo(polyPoints[i].x - bounds.x, polyPoints[i].y - bounds.y);
+                mCtx.closePath();
+                mCtx.fillStyle = '#000000'; mCtx.fill();
+                const maskData = mCtx.getImageData(0,0,bounds.width,bounds.height).data;
+
+                // Eye masks
+                const leftMaskCvs = document.createElement('canvas');
+                leftMaskCvs.width = leftEyeBounds.width; leftMaskCvs.height = leftEyeBounds.height;
+                const lCtx = leftMaskCvs.getContext('2d');
+                lCtx.beginPath();
+                if (leftEyePoints.length > 0) {
+                    lCtx.moveTo(leftEyePoints[0].x - leftEyeBounds.x, leftEyePoints[0].y - leftEyeBounds.y);
+                    for (let i = 1; i < leftEyePoints.length; i++) lCtx.lineTo(leftEyePoints[i].x - leftEyeBounds.x, leftEyePoints[i].y - leftEyeBounds.y);
+                    lCtx.closePath();
+                    lCtx.fill();
+                }
+                const leftMaskData = lCtx.getImageData(0, 0, leftEyeBounds.width, leftEyeBounds.height).data;
+
+                const rightMaskCvs = document.createElement('canvas');
+                rightMaskCvs.width = rightEyeBounds.width; rightMaskCvs.height = rightEyeBounds.height;
+                const rCtx = rightMaskCvs.getContext('2d');
+                rCtx.beginPath();
+                if (rightEyePoints.length > 0) {
+                    rCtx.moveTo(rightEyePoints[0].x - rightEyeBounds.x, rightEyePoints[0].y - rightEyeBounds.y);
+                    for (let i = 1; i < rightEyePoints.length; i++) rCtx.lineTo(rightEyePoints[i].x - rightEyeBounds.x, rightEyePoints[i].y - rightEyeBounds.y);
+                    rCtx.closePath();
+                    rCtx.fill();
+                }
+                const rightMaskData = rCtx.getImageData(0, 0, rightEyeBounds.width, rightEyeBounds.height).data;
+
+                ctx.putImageData(originalImageDataRef.current, 0, 0);
+                const fullData = ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height);
+                const mouthBuffer = new Uint8ClampedArray(bounds.width * bounds.height * 4);
+                
+                for(let y=0; y<bounds.height; y++) {
+                    for(let x=0; x<bounds.width; x++) {
+                        const s = ((bounds.y+y)*canvasRef.current.width + (bounds.x+x))*4;
+                        const d = (y*bounds.width+x)*4;
+                        if(s < fullData.data.length && d < mouthBuffer.length) {
+                            mouthBuffer.set(fullData.data.subarray(s, s+4), d);
+                        }
+                    }
+                }
+
+                // Eye buffers
+                const leftEyeBuffer = new Uint8ClampedArray(leftEyeBounds.width * leftEyeBounds.height * 4);
+                for (let y = 0; y < leftEyeBounds.height; y++) {
+                    for (let x = 0; x < leftEyeBounds.width; x++) {
+                        const s = ((leftEyeBounds.y + y) * canvasRef.current.width + (leftEyeBounds.x + x)) * 4;
+                        const d = (y * leftEyeBounds.width + x) * 4;
+                        if (s < fullData.data.length && d < leftEyeBuffer.length) {
+                            leftEyeBuffer.set(fullData.data.subarray(s, s + 4), d);
+                        }
+                    }
+                }
+
+                const rightEyeBuffer = new Uint8ClampedArray(rightEyeBounds.width * rightEyeBounds.height * 4);
+                for (let y = 0; y < rightEyeBounds.height; y++) {
+                    for (let x = 0; x < rightEyeBounds.width; x++) {
+                        const s = ((rightEyeBounds.y + y) * canvasRef.current.width + (rightEyeBounds.x + x)) * 4;
+                        const d = (y * rightEyeBounds.width + x) * 4;
+                        if (s < fullData.data.length && d < rightEyeBuffer.length) {
+                            rightEyeBuffer.set(fullData.data.subarray(s, s + 4), d);
+                        }
+                    }
+                }
+
+                let audioCtx = audioContextRef.current;
+                if (!audioCtx || audioCtx.state === 'closed') {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    audioContextRef.current = audioCtx;
+                }
+                if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+                setIsAnimating(true); setRecordedVideo(null);
+                const stream = canvasRef.current.captureStream(60);
+                chunksRef.current = []; let analyser;
+
+                if (activeTab === 'audio' && audioUrl) {
+                    const audio = new Audio(audioUrl);
+                    audio.crossOrigin = "anonymous";
+                    audioRef.current = audio;
+                    analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.5;
+                    const src = audioCtx.createMediaElementSource(audio);
+                    const dest = audioCtx.createMediaStreamDestination();
+                    src.connect(analyser); src.connect(audioCtx.destination); src.connect(dest);
+                    dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+                    audio.onended = stopEverything;
+                    try { await audio.play(); } catch(e) { setStatus("Autoplay blocked. Click Stop."); console.warn(e); }
+                }
+
+                try {
+                    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 8000000 });
+                    recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+                    recorder.onstop = () => setRecordedVideo(URL.createObjectURL(new Blob(chunksRef.current, {type:'video/webm'})));
+                    recorder.start();
+                    mediaRecorderRef.current = recorder;
+                } catch (e) { console.warn(e); }
+
+                const dataArray = new Uint8Array(analyser ? analyser.frequencyBinCount : 0);
+                const timeArray = new Uint8Array(analyser ? analyser.fftSize : 0);
+
+                const sr = audioCtx.sampleRate;
+                const hzPerBin = analyser ? (sr / analyser.fftSize) : (sr / 2048);
+                const bin = (hz) => {
+                    if (!dataArray.length) return 0;
+                    return Math.max(0, Math.min(dataArray.length - 1, Math.round(hz / hzPerBin)));
+                };
+
+                const pLo = bin(60),   pHi = bin(200);
+                const vLo = bin(180),  vHi = bin(900);
+                const cLo = bin(2000), cHi = bin(4500);
+
+                const bandAvg = (arr, lo, hi) => {
+                    if (!arr.length) return 0;
+                    lo = Math.max(0, Math.min(arr.length - 1, lo));
+                    hi = Math.max(0, Math.min(arr.length - 1, hi));
+                    if (hi < lo) { const t = lo; lo = hi; hi = t; }
+                    let s = 0, c = 0;
+                    for (let i = lo; i <= hi; i++) { s += arr[i]; c++; }
+                    return c ? (s / c) : 0;
+                };
+
+                const startTime = Date.now();
+                let currentOpenness = 0;
+                let prevTarget = 0;
+                let plosiveHold = 0;
+                let plosivePrev = 0;
+                let blinkTimer = 0;
+                let currentEyeState = eyeState;
+                let rollAngle = 0;
+                let currentPupilX = pupilX;
+                let currentPupilY = pupilY;
+                const eyeActions = parseEyeSequence(eyeSequence);
+                let actionIndex = 0;
+                let saccadeTimer = 0;
+                let saccadeX = 0, saccadeY = 0;
+
+                const loop = () => {
+                    const elapsed = (Date.now() - startTime) / 1000;
+
+                    let target = 0;
+                    let plos = 0, cons = 0, vowel = 0;
+
+                    if (activeTab === 'audio' && analyser) {
+                        analyser.getByteTimeDomainData(timeArray);
+                        let rms = 0;
+                        for (let i = 0; i < timeArray.length; i++) {
+                            const v = (timeArray[i] - 128) / 128;
+                            rms += v * v;
+                        }
+                        rms = timeArray.length ? Math.sqrt(rms / timeArray.length) : 0;
+
+                        analyser.getByteFrequencyData(dataArray);
+                        plos = bandAvg(dataArray, pLo, pHi) / 255;
+                        vowel = bandAvg(dataArray, vLo, vHi) / 255;
+                        cons = bandAvg(dataArray, cLo, cHi) / 255;
+
+                        target = (rms * 1.3 + vowel * 0.9 + cons * 0.8 + plos * 0.6) / (1.3 + 0.9 + 0.8 + 0.6);
+                        target = Math.min(1, Math.max(0, target));
+                    } else if (activeTab === 'tts') {
+                        const t = elapsed;
+                        target = Math.abs(Math.sin(t * 8) * 0.5 + Math.sin(t * 19) * 0.4);
+
+                        // pseudo consonant/plosive from transients
+                        plos = Math.min(1, Math.max(0, (target - prevTarget) * 3));
+                        cons = Math.min(1, Math.max(0, Math.abs(Math.cos(t * 12)) * 0.35));
+                    }
+
+                    const snap = params.current.syllableSnap || 0;
+
+                    // Plosive closure snap (P/B/M/F/V)
+                    const rise = plos - plosivePrev;
+                    if (plos > (0.20 - 0.05 * snap) && rise > (0.06 - 0.03 * snap)) {
+                        plosiveHold = 1;
+                    }
+                    plosivePrev = plos;
+
+                    plosiveHold = Math.max(0, plosiveHold - (0.18 + 0.10 * snap));
+                    const closure = (0.45 + 0.35 * snap) * plosiveHold;
+                    target = Math.max(0, target * (1 - closure));
+
+                    // Sensitivity
+                    target *= params.current.sensitivity;
+
+                    // Articulation scalar for lip press
+                    params.current.articulation = Math.min(1, (cons * 0.9 + plos * 1.1)) * (0.35 + 0.65 * snap);
+
+                    // Syllable Snap shaping + attack/release
+                    let tVal = Math.max(0, target);
+                    tVal = Math.pow(tVal, 1 - 0.75 * snap);
+
+                    const gate = 0.05 + 0.10 * snap;
+                    tVal = Math.max(0, (tVal - gate) / (1 - gate));
+
+                    const delta = tVal - prevTarget;
+                    if (delta > 0) tVal = Math.min(1, tVal + delta * (0.9 + 1.2 * snap));
+
+                    const base = params.current.smoothing;
+                    const attack = Math.min(1, base + 0.35 * snap);
+                    const release = Math.max(0.02, base * (1 - 0.55 * snap));
+                    const alpha = (tVal > currentOpenness) ? attack : release;
+
+                    currentOpenness += (tVal - currentOpenness) * alpha;
+                    prevTarget = tVal;
+
+                    const maxOpen = bounds.height * 0.45;
+                    const openPixels = Math.floor(currentOpenness * maxOpen);
+
+                    processFrame(openPixels, ctx, bounds, mouthBuffer, maskData);
+
+                    // Eye animation
+                    blinkTimer += 1 / 60;
+                    saccadeTimer += 1 / 60;
+                    let eyeOpen = 1;
+                    currentEyeState = eyeState;
+                    rollAngle = (rollAngle + 5) % 360; // Slow rotation for roll
+
+                    // Sequence
+                    if (eyeActions.length > 0 && actionIndex < eyeActions.length) {
+                        if (elapsed >= eyeActions[actionIndex].time) {
+                            currentEyeState = eyeActions[actionIndex].action;
+                            if (currentEyeState.startsWith('look_')) {
+                                // Parse look direction, e.g., look_left: set pupilX/Y
+                                if (currentEyeState === 'look_left') { currentPupilX = -1; currentPupilY = 0; }
+                                if (currentEyeState === 'look_right') { currentPupilX = 1; currentPupilY = 0; }
+                                if (currentEyeState === 'look_up') { currentPupilX = 0; currentPupilY = -1; }
+                                if (currentEyeState === 'look_down') { currentPupilX = 0; currentPupilY = 1; }
+                            }
+                            actionIndex++;
+                        }
+                    }
+
+                    // Random
+                    if (randomEyes) {
+                        if (Math.random() < 0.01) currentEyeState = 'blink'; // Random blink
+                        if (saccadeTimer > 0.5) {
+                            saccadeTimer = 0;
+                            saccadeX = (Math.random() - 0.5) * 0.5;
+                            saccadeY = (Math.random() - 0.5) * 0.5;
+                        }
+                        currentPupilX += saccadeX;
+                        currentPupilY += saccadeY;
+                    }
+
+                    // Logical based on audio
+                    if (logicalEyes) {
+                        if (plos > 0.5) currentEyeState = 'blink'; // Blink on plosives
+                        if (vowel > 0.7) eyeOpen = 1.2; // Wide on vowels
+                        if (cons > 0.6) eyeOpen = 0.8; // Squint on consonants
+                    }
+
+                    // Set open based on state
+                    if (currentEyeState === 'squint') eyeOpen = 0.4;
+                    else if (currentEyeState === 'wide') eyeOpen = 1.5;
+                    else if (currentEyeState === 'blink' || currentEyeState === 'close') eyeOpen = 0;
+                    else if (currentEyeState === 'roll') eyeOpen = 0.8;
+
+                    if (leftEyePoints.length > 2) processEyeFrame(eyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY, currentEyeState === 'roll' ? rollAngle : 0);
+                    if (rightEyePoints.length > 2) processEyeFrame(eyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY, currentEyeState === 'roll' ? rollAngle : 0);
+
+                    animationFrameRef.current = requestAnimationFrame(loop);
+                };
+                loop();
+
+                if (activeTab === 'tts') {
+                    const u = new SpeechSynthesisUtterance(text);
+                    const v = voices.find(vx => vx.name === selectedVoice);
+                    if (v) u.voice = v;
+                    u.onend = stopEverything;
+                    window.speechSynthesis.speak(u);
+                }
+            };
+
+            const stopEverything = () => {
+                setIsAnimating(false);
+                if(animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+                if(mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
+                if(audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+                window.speechSynthesis.cancel();
+                if(canvasRef.current && originalImageDataRef.current) {
+                    const ctx = canvasRef.current.getContext('2d');
+                    ctx.putImageData(originalImageDataRef.current, 0, 0);
+                    drawOverlay();
+                }
+            };
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        imageRef.current = img;
+                        setImage(ev.target.result);
+                        setPolyPoints([]); setLeftEyePoints([]); setRightEyePoints([]); setRecordedVideo(null);
+                        setTimeout(() => {
+                            const cvs = canvasRef.current;
+                            const ctx = cvs.getContext('2d');
+                            const MAX = 1920; 
+                            const scale = Math.min(1, MAX / img.width);
+                            cvs.width = Math.round(img.width * scale);
+                            cvs.height = Math.round(img.height * scale);
+                            ctx.imageSmoothingQuality = 'high';
+                            ctx.drawImage(img, 0, 0, cvs.width, cvs.height);
+                            originalImageDataRef.current = ctx.getImageData(0, 0, cvs.width, cvs.height);
+                            if(modelsLoaded) autoDetect();
+                        }, 50);
+                    };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const autoDetect = async () => {
+                setIsDetecting(true);
+                try {
+                    const srcCvs = canvasRef.current;
+                    if (!srcCvs) return;
+
+                    // Downscale for faster detection, then map landmarks back up
+                    const maxSide = 640;
+                    const scale = Math.min(1, maxSide / Math.max(srcCvs.width, srcCvs.height));
+                    const detCvs = document.createElement("canvas");
+                    detCvs.width = Math.round(srcCvs.width * scale);
+                    detCvs.height = Math.round(srcCvs.height * scale);
+
+                    const dctx = detCvs.getContext("2d", { willReadFrequently: true });
+                    dctx.drawImage(srcCvs, 0, 0, detCvs.width, detCvs.height);
+
+                    const opts = new faceapi.TinyFaceDetectorOptions({
+                        inputSize: 224,
+                        scoreThreshold: 0.4,
+                    });
+
+                    const detection = await faceapi
+                        .detectSingleFace(detCvs, opts)
+                        .withFaceLandmarks();
+
+                    if (detection) {
+                        const mouth = detection.landmarks.getMouth();
+
+                        // Outer mouth ring (first 12 points), mapped back to original canvas coords
+                        const outer = mouth.slice(0, 12).map((p) => ({ x: p.x / scale, y: p.y / scale }));
+
+                        const center = outer.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
+                        center.x /= outer.length;
+                        center.y /= outer.length;
+
+                        const expanded = outer.map((p) => ({
+                            x: center.x + (p.x - center.x) * 1.4,
+                            y: center.y + (p.y - center.y) * 1.3,
+                        }));
+
+                        // Depth "chin bag" scaled to mouth size
+                        const b = getBounds(expanded);
+                        const chinDrop = Math.min(b.height * 0.25, 60);
+                        for (let i = 6; i <= 10; i++) if (expanded[i]) expanded[i].y += chinDrop;
+
+                        setPolyPoints(expanded);
+                        setLipSplit(0.5);
+
+                        // Eyes
+                        const leftEye = detection.landmarks.getLeftEye().map(p => ({x: p.x / scale, y: p.y / scale}));
+                        const rightEye = detection.landmarks.getRightEye().map(p => ({x: p.x / scale, y: p.y / scale}));
+                        setLeftEyePoints(leftEye);
+                        setRightEyePoints(rightEye);
+
+                        drawOverlay();
+                        setStatus("Detected. Refine points or start animation.");
+                    } else {
+                        setStatus("No face detected. Use Manual Mouth Box.");
+                    }
+                } catch (e) {
+                    console.error(e);
+                    setStatus("Detect failed. Use Manual Mouth Box.");
+                }
+                setIsDetecting(false);
+            };
+
+            const drawOverlay = () => {
+                const ctx = canvasRef.current.getContext('2d');
+                if (originalImageDataRef.current) ctx.putImageData(originalImageDataRef.current, 0, 0);
+
+                // Mouth
+                if (polyPoints.length > 0) {
+                    ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(polyPoints[0].x, polyPoints[0].y);
+                    for (let i = 1; i < polyPoints.length; i++) ctx.lineTo(polyPoints[i].x, polyPoints[i].y);
+                    ctx.closePath(); ctx.stroke();
+
+                    ctx.fillStyle = '#fff';
+                    polyPoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
+                }
+
+                // Eyes with pupils in overlay for editing
+                const drawEyeOverlay = (eyePoints, isLeft) => {
+                    if (eyePoints.length > 0) {
+                        ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(eyePoints[0].x, eyePoints[0].y);
+                        for (let i = 1; i < eyePoints.length; i++) ctx.lineTo(eyePoints[i].x, eyePoints[i].y);
+                        ctx.closePath(); ctx.stroke();
+
+                        ctx.fillStyle = '#fff';
+                        eyePoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill(); });
+
+                        // Draw pupil preview
+                        const eb = getBounds(eyePoints);
+                        const ecx = eb.x + eb.width / 2;
+                        const ecy = eb.y + eb.height / 2;
+                        ctx.fillStyle = 'black';
+                        ctx.beginPath();
+                        ctx.arc(ecx + pupilX * (eb.width / 4), ecy + pupilY * (eb.height / 4), Math.min(eb.width, eb.height) * 0.15, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                };
+                drawEyeOverlay(leftEyePoints, true);
+                drawEyeOverlay(rightEyePoints, false);
+
+                // Guides for mouth
+                if (polyPoints.length > 0) {
+                    const b = getBounds(polyPoints);
+                    const lipW = b.width * params.current.lipWidth;
+                    const lx = b.x + (b.width - lipW) / 2;
+                    const cx = b.x + b.width / 2;
+                    const baseSplitY = b.y + (b.height * params.current.lipSplit);
+
+                    // Curved split guide (shows Cupid's Bow + Smile Curve impact)
+                    ctx.strokeStyle = '#00ff99';
+                    ctx.setLineDash([5, 5]);
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    const N = 80;
+                    for (let i = 0; i <= N; i++) {
+                        const x = b.x + (i / N) * b.width;
+                        const nx = (x - cx) / (lipW / 2);
+                        const mainCurve = (nx * nx) * params.current.lipCurve * (b.height * 0.1);
+                        const bow = Math.cos(nx * Math.PI * 2.5) * params.current.cupidBow * (b.height * 0.05);
+                        const bowFaded = bow * Math.max(0, 1 - Math.abs(nx * 1.5));
+                        const y = baseSplitY - mainCurve - bowFaded;
+                        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Lip width box
+                    ctx.strokeStyle = '#ffae00';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(lx, baseSplitY - 10, lipW, 20);
+                }
+            };
+
+            const resetAll = () => { stopEverything(); setImage(null); setRecordedVideo(null); setPolyPoints([]); setLeftEyePoints([]); setRightEyePoints([]); };
+
+            return (
+                <div className="layout">
+                    <div className="stage" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onDoubleClick={handleDoubleClick}>
+                        {!image && <div className="upload-zone" onClick={()=>document.getElementById('imgIn').click()}><h2>Upload Photo</h2><p>High Resolution Recommended</p><input id="imgIn" type="file" onChange={handleImageUpload} style={{display:'none'}} accept="image/*" /></div>}
+                        <canvas ref={canvasRef} style={{opacity: image?1:0}} />
+                        {isDetecting && <div className="overlay-msg"><div className="spinner"></div><span>Scanning Face...</span></div>}
+                    </div>
+
+                    <div className="controls">
+                        <h1>Lip Sync Pro</h1>
+                        <div className="panel">
+                            <h3>Setup</h3>
+                            <div className="btn-row">
+                                <button className="btn" onClick={autoDetect} disabled={!image || isAnimating}>Auto-Detect</button>
+
+                                <button
+                                    className={`btn ${manualBoxMode ? 'btn-primary' : ''}`}
+                                    onClick={() => setManualBoxMode(v => !v)}
+                                    disabled={!image || isAnimating}
+                                    title="Click, then drag a box over the mouth or eyes"
+                                >
+                                    {manualBoxMode ? 'Manual Box: ON' : 'Manual Box'}
+                                </button>
+
+                                <button className="btn btn-danger" onClick={resetAll}>Reset</button>
+                            </div>
+                            <div className="hint">
+                                Tip: Drag points to refine. Drag inside the shape to move it. Box-select with Shift+drag or Manual Box.
+                            </div>
+                        </div>
+
+                        <div className="panel">
+                            <h3>Edit Mode</h3>
+                            <div className="tabs">
+                                <div className={`tab ${activeEdit === 'mouth' ? 'active' : ''}`} onClick={() => setActiveEdit('mouth')}>Mouth</div>
+                                <div className={`tab ${activeEdit === 'eyes' ? 'active' : ''}`} onClick={() => setActiveEdit('eyes')}>Eyes</div>
+                            </div>
+                        </div>
+
+                        <div className="panel">
+                            <h3>Audio Source</h3>
+                            <div className="tabs">
+                                <div className={`tab ${activeTab==='audio'?'active':''}`} onClick={()=>setActiveTab('audio')}>Audio</div>
+                                <div className={`tab ${activeTab==='tts'?'active':''}`} onClick={()=>setActiveTab('tts')}>TTS</div>
+                            </div>
+                            {activeTab==='audio' ? (
+                                <div>
+                                    <input type="file" accept="audio/*" onChange={(e)=>{if(e.target.files[0])setAudioUrl(URL.createObjectURL(e.target.files[0]))}} />
+                                    {audioUrl && <audio src={audioUrl} controls style={{width:'100%', marginTop:10}} />}
+                                    <div className="btn-row" style={{marginTop: 10}}>
+                                        <button className="btn" onClick={startVoiceRecord} disabled={isRecordingVoice}>Record Voice</button>
+                                        <button className="btn btn-danger" onClick={stopVoiceRecord} disabled={!isRecordingVoice}>Stop Recording</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div>
+                                    <textarea value={text} onChange={e=>setText(e.target.value)} style={{width:'100%', background:'#1a1a1a', color:'#fff', border:'none', padding:10, borderRadius:4, minHeight:60}} />
+                                    <select style={{marginTop:8, width:'100%', background:'#1a1a1a', color:'#fff', padding:8}} onChange={e=>setSelectedVoice(e.target.value)}><option value="">Default Voice</option>{voices.map(v=><option key={v.name} value={v.name}>{v.name}</option>)}</select>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="panel">
+                            <h3>Lip Geometry</h3>
+                            <div className="slider-row">
+                                <label style={{color:'#ffae00'}}>Lip Width</label>
+                                <input type="range" min="0.3" max="1.0" step="0.05" value={lipWidth} onChange={e=>setLipWidth(Number(e.target.value))} />
+                            </div>
+                            <div className="slider-row">
+                                <label style={{color:'#00ff99'}}>Vertical Center</label>
+                                <input type="range" min="0.3" max="0.7" step="0.01" value={lipSplit} onChange={e=>setLipSplit(Number(e.target.value))} />
+                            </div>
+                            <div className="slider-row">
+                                <label>Cupid's Bow</label>
+                                <input type="range" min="-1.0" max="1.0" step="0.05" value={cupidBow} onChange={e=>setCupidBow(Number(e.target.value))} />
+                            </div>
+                            <div className="slider-row">
+                                <label>Smile Curve</label>
+                                <input type="range" min="-0.5" max="0.5" step="0.05" value={lipCurve} onChange={e=>setLipCurve(Number(e.target.value))} />
+                            </div>
+                        </div>
+
+                        <div className="panel">
+                            <h3>3D Anatomy</h3>
+
+                            <div className="slider-row">
+                                <label>Jaw Gap</label>
+                                <input type="range" min="0" max="0.3" step="0.01" value={jawGap} onChange={e=>setJawGap(Number(e.target.value))} />
+                            </div>
+
+                            <div className="slider-row">
+                                <label>Teeth Brightness</label>
+                                <input type="range" min="0.2" max="1" step="0.05" value={teethBrightness} onChange={e=>setTeethBrightness(Number(e.target.value))} />
+                            </div>
+
+                            <div className="slider-row">
+                                <label>Teeth Vertical</label>
+                                <input type="range" min="-0.2" max="0.2" step="0.01" value={teethVertical} onChange={e=>setTeethVertical(Number(e.target.value))} />
+                            </div>
+
+                            <div className="slider-row">
+                                <label>Teeth Shade</label>
+                                <input type="range" min="0" max="1" step="0.1" value={teethShade} onChange={e=>setTeethShade(Number(e.target.value))} />
+                            </div>
+
+                            <div className="slider-row">
+                                <label>Tongue Height</label>
+                                <input type="range" min="0" max="1.5" step="0.1" value={tongueHeight} onChange={e=>setTongueHeight(Number(e.target.value))} />
+                            </div>
+
+                            <div className="slider-row">
+                                <label>Lip Lighten</label>
+                                <input type="range" min="0" max="1" step="0.1" value={lipLighten} onChange={e=>setLipLighten(Number(e.target.value))} />
+                            </div>
+
+                            <div className="slider-row">
+                                <label>Split Color</label>
+                                <input type="range" min="0" max="1" step="0.05" value={splitColor} onChange={e=>setSplitColor(Number(e.target.value))} />
+                            </div>
+
+                            <div className="slider-row">
+                                <label>Split Texture</label>
+                                <input type="range" min="0" max="1" step="0.05" value={splitTexture} onChange={e=>setSplitTexture(Number(e.target.value))} />
+                            </div>
+                        </div>
+
+                        <div className="panel">
+                            <h3>Animation Tuning</h3>
+                            <div className="slider-row">
+                                <label>Sensitivity</label>
+                                <input type="range" min="0.2" max="3" step="0.1" value={sensitivity} onChange={e=>setSensitivity(Number(e.target.value))} />
+                            </div>
+
+                            <div className="slider-row">
+                                <label>Lip Roll</label>
+                                <input type="range" min="0" max="1" step="0.05" value={lipRoll} onChange={e=>setLipRoll(Number(e.target.value))} />
+                            </div>
+
+                            <div className="slider-row">
+                                <label>Syllable Snap</label>
+                                <input type="range" min="0" max="1" step="0.05" value={syllableSnap} onChange={e=>setSyllableSnap(Number(e.target.value))} />
+                            </div>
+
+                            <div className="slider-row">
+                                <label>Smoothing</label>
+                                <input type="range" min="0.02" max="0.6" step="0.01" value={smoothing} onChange={e=>setSmoothing(Number(e.target.value))} />
+                            </div>
+                        </div>
+
+                        <div className="panel">
+                            <h3>Eye Controls</h3>
+                            <div className="slider-row">
+                                <label>Pupil X</label>
+                                <input type="range" min="-1" max="1" step="0.1" value={pupilX} onChange={e=>setPupilX(Number(e.target.value))} />
+                            </div>
+                            <div className="slider-row">
+                                <label>Pupil Y</label>
+                                <input type="range" min="-1" max="1" step="0.1" value={pupilY} onChange={e=>setPupilY(Number(e.target.value))} />
+                            </div>
+                            <div className="slider-row">
+                                <label>Eye Brightness</label>
+                                <input type="range" min="-50" max="50" step="5" value={eyeBrightness} onChange={e=>setEyeBrightness(Number(e.target.value))} />
+                            </div>
+                            <div className="slider-row">
+                                <label>Eye Hue</label>
+                                <input type="range" min="-180" max="180" step="10" value={eyeHue} onChange={e=>setEyeHue(Number(e.target.value))} />
+                            </div>
+                            <div className="slider-row">
+                                <label>Eye Saturation</label>
+                                <input type="range" min="0" max="2" step="0.1" value={eyeSaturation} onChange={e=>setEyeSaturation(Number(e.target.value))} />
+                            </div>
+                            <div className="btn-row">
+                                <button className="btn" onClick={() => setEyeState('squint')}>Squint</button>
+                                <button className="btn" onClick={() => setEyeState('wide')}>Wide</button>
+                                <button className="btn" onClick={() => setEyeState('blink')}>Blink</button>
+                                <button className="btn" onClick={() => setEyeState('close')}>Close</button>
+                                <button className="btn" onClick={() => setEyeState('roll')}>Roll</button>
+                                <button className="btn" onClick={() => setEyeState('normal')}>Normal</button>
+                            </div>
+                            <label>Eye Sequence (time:action, e.g., 0:normal,2:blink,3:look_left)</label>
+                            <textarea value={eyeSequence} onChange={e => setEyeSequence(e.target.value)} style={{width: '100%', height: '50px'}} />
+                            <div className="btn-row">
+                                <button className="btn" onClick={() => setRandomEyes(!randomEyes)}>{randomEyes ? 'Disable Random' : 'Enable Random'}</button>
+                                <button className="btn" onClick={() => setLogicalEyes(!logicalEyes)}>{logicalEyes ? 'Disable Logical' : 'Enable Logical'}</button>
+                            </div>
+                        </div>
+
+                        <div className="panel">
+                            <h3>Drafts</h3>
+                            <div className="btn-row">
+                                <button className="btn" onClick={saveDraft}>Save Draft</button>
+                                <button className="btn btn-danger" onClick={clearDraft}>Clear Draft</button>
+                            </div>
+                        </div>
+
+                        {!isAnimating ? (
+                            <button className="btn btn-primary" style={{padding:15, fontSize:'1.1em'}} onClick={startAnimation} disabled={polyPoints.length < 3}>Animate & Record</button>
+                        ) : (
+                            <button className="btn btn-danger" style={{padding:15, fontSize:'1.1em'}} onClick={stopEverything}>Stop</button>
+                        )}
+
+                        <div style={{textAlign:'center', color:'#666', fontSize:'0.8rem'}}>{status}</div>
+
+                        {recordedVideo && (
+                            <div className="panel" style={{textAlign:'center', borderColor:'#00ff99'}}>
+                                <h3 style={{color:'#00ff99', margin:0}}>Result Ready</h3>
+                                <video controls src={recordedVideo} style={{width:'100%', marginTop:10, borderRadius:4}} />
+                                <a href={recordedVideo} download="lipsync_3d.webm" className="btn btn-primary" style={{display:'block', marginTop:10, textDecoration:'none'}}>Download</a>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
