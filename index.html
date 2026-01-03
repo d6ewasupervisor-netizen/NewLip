@@ -1980,7 +1980,30 @@
                                             setPanOffset({ x: 0, y: 0 });
                                         } else {
                                             setIsZoomed(true);
-                                            setZoomScale(2.5);
+                                            const newZoomScale = 2.5;
+                                            setZoomScale(newZoomScale);
+
+                                            // Auto-center on mouth when zooming in
+                                            if (polyPoints.length > 0 && canvasRef.current) {
+                                                const bounds = getBounds(polyPoints);
+                                                const imageWidth = canvasRef.current.width;
+                                                const imageHeight = canvasRef.current.height;
+                                                const viewportWidth = imageWidth / newZoomScale;
+                                                const viewportHeight = imageHeight / newZoomScale;
+
+                                                // Center the viewport on the mouth center
+                                                const mouthCenterX = bounds.x + bounds.width / 2;
+                                                const mouthCenterY = bounds.y + bounds.height / 2;
+
+                                                let newPanX = mouthCenterX - viewportWidth / 2;
+                                                let newPanY = mouthCenterY - viewportHeight / 2;
+
+                                                // Clamp to image bounds
+                                                newPanX = Math.max(0, Math.min(imageWidth - viewportWidth, newPanX));
+                                                newPanY = Math.max(0, Math.min(imageHeight - viewportHeight, newPanY));
+
+                                                setPanOffset({ x: newPanX, y: newPanY });
+                                            }
                                         }
                                         setTimeout(drawOverlay, 10);
                                     }}
