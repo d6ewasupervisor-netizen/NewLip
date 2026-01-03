@@ -166,7 +166,7 @@
                     generateMouthTexture(bounds.width, bounds.height);
                     drawOverlay();
                 }
-            }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints]);
+            }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints, zoomMode, zoomScale]);
 
             React.useEffect(() => {
                 const init = async () => {
@@ -272,12 +272,23 @@
                 const scaleX = canvasRef.current.width / rect.width;
                 const scaleY = canvasRef.current.height / rect.height;
 
+                let canvasX, canvasY;
+
                 // Handle touch events
                 if (e.touches && e.touches.length > 0) {
-                    return { x: (e.touches[0].clientX - rect.left) * scaleX, y: (e.touches[0].clientY - rect.top) * scaleY };
+                    canvasX = (e.touches[0].clientX - rect.left) * scaleX;
+                    canvasY = (e.touches[0].clientY - rect.top) * scaleY;
+                } else {
+                    canvasX = (e.clientX - rect.left) * scaleX;
+                    canvasY = (e.clientY - rect.top) * scaleY;
                 }
 
-                return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+                // If in zoom mode, transform coordinates back to original image space
+                if (zoomMode && canvasRef.current.zoomTransform) {
+                    return transformFromZoom({ x: canvasX, y: canvasY });
+                }
+
+                return { x: canvasX, y: canvasY };
             };
 
             const isNearPoint = (p, target, radius=20) => Math.sqrt(Math.pow(p.x - target.x, 2) + Math.pow(p.y - target.y, 2)) < radius;
@@ -1408,9 +1419,116 @@
                 setIsDetecting(false);
             };
 
+            const transformToZoom = (point) => {
+                const transform = canvasRef.current.zoomTransform;
+                if (!transform) return point;
+                return {
+                    x: transform.offsetX + (point.x - transform.bounds.x) * transform.scale,
+                    y: transform.offsetY + (point.y - transform.bounds.y) * transform.scale
+                };
+            };
+
+            const transformFromZoom = (point) => {
+                const transform = canvasRef.current.zoomTransform;
+                if (!transform) return point;
+                return {
+                    x: (point.x - transform.offsetX) / transform.scale + transform.bounds.x,
+                    y: (point.y - transform.offsetY) / transform.scale + transform.bounds.y
+                };
+            };
+
             const drawOverlay = () => {
                 const ctx = canvasRef.current.getContext('2d');
+
+                // If in zoom mode, draw zoomed view
+                if (zoomMode && originalImageDataRef.current) {
+                    let zoomPoints = [];
+                    if (zoomMode === 'mouth') zoomPoints = polyPoints;
+                    else if (zoomMode === 'leftEye') zoomPoints = leftEyePoints;
+                    else if (zoomMode === 'rightEye') zoomPoints = rightEyePoints;
+
+                    if (zoomPoints.length > 0) {
+                        const bounds = getBounds(zoomPoints);
+                        const padding = 50;
+                        const zoomBounds = {
+                            x: Math.max(0, bounds.x - padding),
+                            y: Math.max(0, bounds.y - padding),
+                            width: Math.min(canvasRef.current.width - bounds.x + padding, bounds.width + padding * 2),
+                            height: Math.min(canvasRef.current.height - bounds.y + padding, bounds.height + padding * 2)
+                        };
+
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.width = canvasRef.current.width;
+                        tempCanvas.height = canvasRef.current.height;
+                        const tempCtx = tempCanvas.getContext('2d');
+                        tempCtx.putImageData(originalImageDataRef.current, 0, 0);
+
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+
+                        const scaledWidth = zoomBounds.width * zoomScale;
+                        const scaledHeight = zoomBounds.height * zoomScale;
+                        const offsetX = (canvasRef.current.width - scaledWidth) / 2;
+                        const offsetY = (canvasRef.current.height - scaledHeight) / 2;
+
+                        ctx.drawImage(
+                            tempCanvas,
+                            zoomBounds.x, zoomBounds.y, zoomBounds.width, zoomBounds.height,
+                            offsetX, offsetY, scaledWidth, scaledHeight
+                        );
+
+                        canvasRef.current.zoomTransform = {
+                            bounds: zoomBounds,
+                            offsetX,
+                            offsetY,
+                            scale: zoomScale
+                        };
+
+                        const drawZoomedPoints = (points, color) => {
+                            if (points.length === 0) return;
+                            ctx.strokeStyle = color;
+                            ctx.lineWidth = 3;
+                            ctx.beginPath();
+                            const firstPt = transformToZoom(points[0]);
+                            ctx.moveTo(firstPt.x, firstPt.y);
+                            for (let i = 1; i < points.length; i++) {
+                                const pt = transformToZoom(points[i]);
+                                ctx.lineTo(pt.x, pt.y);
+                            }
+                            if (color !== '#ffaa00') ctx.closePath();
+                            ctx.stroke();
+
+                            ctx.fillStyle = '#fff';
+                            points.forEach(p => {
+                                const pt = transformToZoom(p);
+                                ctx.beginPath();
+                                ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
+                                ctx.fill();
+                            });
+                        };
+
+                        if (zoomMode === 'mouth') {
+                            drawZoomedPoints(polyPoints, '#ff00ff');
+                        } else if (zoomMode === 'leftEye') {
+                            drawZoomedPoints(leftEyePoints, '#00ff00');
+                            drawZoomedPoints(leftEyebrowPoints, '#ffaa00');
+                        } else if (zoomMode === 'rightEye') {
+                            drawZoomedPoints(rightEyePoints, '#00ff00');
+                            drawZoomedPoints(rightEyebrowPoints, '#ffaa00');
+                        }
+
+                        ctx.fillStyle = '#00ff99';
+                        ctx.font = '14px sans-serif';
+                        ctx.fillText(`ZOOM: ${zoomMode.toUpperCase()} (${zoomScale.toFixed(1)}x)`, 20, 30);
+                        ctx.fillText('Click "Exit Zoom" to return', 20, 50);
+
+                        return;
+                    }
+                }
+
+                // Normal overlay
                 if (originalImageDataRef.current) ctx.putImageData(originalImageDataRef.current, 0, 0);
+                canvasRef.current.zoomTransform = null;
 
                 // Mouth
                 if (polyPoints.length > 0) {
@@ -1526,6 +1644,46 @@
 
                                 <button className="btn btn-danger" onClick={resetAll}>Reset</button>
                             </div>
+
+                            <h3 style={{marginTop: 15, fontSize: '0.9rem'}}>Zoom for Fine-Tuning</h3>
+                            <div className="btn-row">
+                                <button
+                                    className={`btn ${zoomMode === 'mouth' ? 'btn-primary' : ''}`}
+                                    onClick={() => { setZoomMode(zoomMode === 'mouth' ? null : 'mouth'); setTimeout(drawOverlay, 10); }}
+                                    disabled={!image || isAnimating || polyPoints.length === 0}
+                                >
+                                    {zoomMode === 'mouth' ? 'Exit Mouth' : 'Zoom Mouth'}
+                                </button>
+                                <button
+                                    className={`btn ${zoomMode === 'leftEye' ? 'btn-primary' : ''}`}
+                                    onClick={() => { setZoomMode(zoomMode === 'leftEye' ? null : 'leftEye'); setTimeout(drawOverlay, 10); }}
+                                    disabled={!image || isAnimating || leftEyePoints.length === 0}
+                                >
+                                    {zoomMode === 'leftEye' ? 'Exit L-Eye' : 'Zoom L-Eye'}
+                                </button>
+                                <button
+                                    className={`btn ${zoomMode === 'rightEye' ? 'btn-primary' : ''}`}
+                                    onClick={() => { setZoomMode(zoomMode === 'rightEye' ? null : 'rightEye'); setTimeout(drawOverlay, 10); }}
+                                    disabled={!image || isAnimating || rightEyePoints.length === 0}
+                                >
+                                    {zoomMode === 'rightEye' ? 'Exit R-Eye' : 'Zoom R-Eye'}
+                                </button>
+                            </div>
+                            {zoomMode && (
+                                <div className="slider-row" style={{marginTop: 10}}>
+                                    <label>Zoom Level</label>
+                                    <input
+                                        type="range"
+                                        min="1.5"
+                                        max="5"
+                                        step="0.5"
+                                        value={zoomScale}
+                                        onChange={e => { setZoomScale(Number(e.target.value)); setTimeout(drawOverlay, 10); }}
+                                    />
+                                    <span style={{fontSize: '0.7rem', color: '#888'}}>{zoomScale.toFixed(1)}x</span>
+                                </div>
+                            )}
+
                             <div className="hint">
                                 Tip: Drag points to refine. Drag inside the shape to move it. Box-select with Shift+drag or Manual Box.
                             </div>
