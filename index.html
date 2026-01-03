@@ -95,6 +95,7 @@
             const [isPanning, setIsPanning] = React.useState(false);
             const panStartRef = React.useRef(null);
             const panOffsetStartRef = React.useRef(null);
+            const zoomOutHoldTimerRef = React.useRef(null);
 
             // Feature toggles
             const [enableMouth, setEnableMouth] = React.useState(true);
@@ -587,23 +588,26 @@
                 // If zoomed in
                 if (isZoomed && zoomScale > 1.0) {
                     if (clicked) {
-                        // Clicked on a polygon while zoomed - auto-exit zoom and start dragging
-                        setIsZoomed(false);
-                        setZoomScale(1.0);
-                        setPanOffset({ x: 0, y: 0 });
+                        if (clicked.pointIndex !== -1) {
+                            // Clicked on a point - allow dragging while zoomed (don't zoom out)
+                            setDraggedPointIndex(clicked.pointIndex);
+                            setDraggedEye(clicked.type);
+                        } else {
+                            // Clicked inside polygon - start hold timer to zoom out for repositioning
+                            zoomOutHoldTimerRef.current = setTimeout(() => {
+                                setIsZoomed(false);
+                                setZoomScale(1.0);
+                                setPanOffset({ x: 0, y: 0 });
 
-                        // Start dragging after a brief delay to let zoom reset
-                        setTimeout(() => {
-                            if (clicked.pointIndex !== -1) {
-                                setDraggedPointIndex(clicked.pointIndex);
-                                setDraggedEye(clicked.type);
-                            } else {
-                                setIsDraggingPoly(true);
-                                setDraggedEye(clicked.type);
-                                polyDragStartRef.current = m;
-                                polyDragOrigRef.current = clicked.points.map(p => ({ ...p }));
-                            }
-                        }, 50);
+                                // Start dragging after zoom reset
+                                setTimeout(() => {
+                                    setIsDraggingPoly(true);
+                                    setDraggedEye(clicked.type);
+                                    polyDragStartRef.current = m;
+                                    polyDragOrigRef.current = clicked.points.map(p => ({ ...p }));
+                                }, 50);
+                            }, 500); // Hold for 500ms to trigger zoom out
+                        }
                     } else {
                         // Start panning
                         setIsPanning(true);
@@ -644,6 +648,12 @@
 
             const handleMouseMove = (e) => {
                 if (!image) return;
+
+                // Clear zoom-out hold timer if mouse moves (user is panning/dragging, not holding)
+                if (zoomOutHoldTimerRef.current) {
+                    clearTimeout(zoomOutHoldTimerRef.current);
+                    zoomOutHoldTimerRef.current = null;
+                }
 
                 // Handle panning when zoomed
                 if (isPanning && panStartRef.current && panOffsetStartRef.current) {
@@ -736,6 +746,12 @@
             };
 
             const handleMouseUp = () => {
+                // Clear zoom-out hold timer if it's pending
+                if (zoomOutHoldTimerRef.current) {
+                    clearTimeout(zoomOutHoldTimerRef.current);
+                    zoomOutHoldTimerRef.current = null;
+                }
+
                 if (isBoxSelecting && boxStartRef.current && boxRect) {
                     setIsBoxSelecting(false);
                     boxStartRef.current = null;
