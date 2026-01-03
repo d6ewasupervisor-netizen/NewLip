@@ -132,10 +132,9 @@
             const audioContextRef = React.useRef(null);
             const mediaRecorderRef = React.useRef(null);
             const chunksRef = React.useRef([]);
-            
+
             const params = React.useRef({});
-            const eyeParams = React.useRef({});
-            
+
             const draftKey = 'lipSyncDraft';
 
             const getBounds = (points) => {
@@ -809,7 +808,7 @@
                 return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
             };
 
-            const processEyeFrame = (eyeOpen, ctx, bounds, eyeBuffer, maskData, currentPupilX, currentPupilY, rollAngle = 0) => {
+            const processEyeFrame = (eyeOpen, ctx, bounds, eyeBuffer, maskData, currentPupilX, currentPupilY) => {
                 if (!originalImageDataRef.current || bounds.width < 1 || bounds.height < 1) return;
 
                 const currentImg = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
@@ -822,13 +821,6 @@
                 // For eyes, we mainly warp the upper lid down for closing/squinting
                 let maxClose = h * 0.4;
                 let closeAmount = Math.max(0, (1 - eyeOpen) * maxClose);
-
-                if (eyeState === 'close') closeAmount = maxClose;
-                if (eyeState === 'wide') closeAmount = -maxClose * 0.5;
-                if (eyeState === 'roll') {
-                    // For roll, slight close and pupil rotation
-                    closeAmount = maxClose * 0.2;
-                }
 
                 for (let x = 0; x < w; x++) {
                     const nx = (x - cx) / (w / 2);
@@ -875,16 +867,9 @@
 
                 // Draw pupil
                 const pupilRadius = Math.min(w, h) * 0.15;
-                let pupilCx = cx + currentPupilX * (w / 4);
-                let pupilCy = cy + currentPupilY * (h / 4);
-                if (eyeState === 'roll') {
-                    // Rotate pupil position
-                    const angle = rollAngle * Math.PI / 180;
-                    const dx = pupilCx - cx;
-                    const dy = pupilCy - cy;
-                    pupilCx = cx + dx * Math.cos(angle) - dy * Math.sin(angle);
-                    pupilCy = cy + dx * Math.sin(angle) + dy * Math.cos(angle);
-                }
+                const pupilCx = cx + currentPupilX * (w / 4);
+                const pupilCy = cy + currentPupilY * (h / 4);
+
                 const tempCvs = document.createElement('canvas');
                 tempCvs.width = w; tempCvs.height = h;
                 const tempCtx = tempCvs.getContext('2d');
@@ -1162,8 +1147,8 @@
                     else if (currentEyeState === 'glare') eyeOpen = 0.4;
                     else eyeOpen = 1;
 
-                    if (leftEyePoints.length > 2) processEyeFrame(eyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY, 0);
-                    if (rightEyePoints.length > 2) processEyeFrame(eyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY, 0);
+                    if (leftEyePoints.length > 2) processEyeFrame(eyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY);
+                    if (rightEyePoints.length > 2) processEyeFrame(eyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY);
 
                     animationFrameRef.current = requestAnimationFrame(loop);
                 };
