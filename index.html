@@ -83,16 +83,8 @@
             // Eyes
             const [leftEyePoints, setLeftEyePoints] = React.useState([]);
             const [rightEyePoints, setRightEyePoints] = React.useState([]);
-            const [eyeState, setEyeState] = React.useState('normal');
-            const [activeEdit, setActiveEdit] = React.useState('mouth');
-            const [pupilX, setPupilX] = React.useState(0);
-            const [pupilY, setPupilY] = React.useState(0);
-            const [eyeBrightness, setEyeBrightness] = React.useState(0);
-            const [eyeHue, setEyeHue] = React.useState(0);
-            const [eyeSaturation, setEyeSaturation] = React.useState(1);
-            const [randomEyes, setRandomEyes] = React.useState(false);
-            const [eyeSequence, setEyeSequence] = React.useState(''); // e.g., "0:normal,2:blink,3:squint,5:look_left"
-            const [logicalEyes, setLogicalEyes] = React.useState(false);
+            const [eyePresets, setEyePresets] = React.useState(['blink', 'look_left', 'look_right']); // Selected eye presets to apply randomly
+            const [draggedEye, setDraggedEye] = React.useState(null); // 'left' or 'right'
 
             // Interaction
             const [activeTab, setActiveTab] = React.useState('audio');
@@ -158,13 +150,12 @@
 
             React.useEffect(() => {
                 params.current = { lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap };
-                eyeParams.current = { pupilX, pupilY, eyeBrightness, eyeHue, eyeSaturation };
                 if (polyPoints.length > 2 && !isAnimating) {
                     const bounds = getBounds(polyPoints);
                     generateMouthTexture(bounds.width, bounds.height);
                     drawOverlay();
                 }
-            }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints, eyeState, pupilX, pupilY, eyeBrightness, eyeHue, eyeSaturation]);
+            }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints]);
 
             React.useEffect(() => {
                 const init = async () => {
@@ -207,15 +198,7 @@
                     setPolyPoints(data.polyPoints || []);
                     setLeftEyePoints(data.leftEyePoints || []);
                     setRightEyePoints(data.rightEyePoints || []);
-                    setEyeState(data.eyeState || 'normal');
-                    setPupilX(data.pupilX || 0);
-                    setPupilY(data.pupilY || 0);
-                    setEyeBrightness(data.eyeBrightness || 0);
-                    setEyeHue(data.eyeHue || 0);
-                    setEyeSaturation(data.eyeSaturation || 1);
-                    setRandomEyes(data.randomEyes || false);
-                    setEyeSequence(data.eyeSequence || '');
-                    setLogicalEyes(data.logicalEyes || false);
+                    setEyePresets(data.eyePresets || ['blink', 'look_left', 'look_right']);
                     setText(data.text || "Notice the 3D shape of the teeth and the bottom molars.");
                     setSelectedVoice(data.selectedVoice || "");
                     // AudioUrl and image not saved as they are large/blobs
@@ -226,7 +209,7 @@
                 const data = {
                     lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten,
                     splitColor, splitTexture, lipRoll, syllableSnap, sensitivity, smoothing,
-                    polyPoints, leftEyePoints, rightEyePoints, eyeState, pupilX, pupilY, eyeBrightness, eyeHue, eyeSaturation, randomEyes, eyeSequence, logicalEyes, text, selectedVoice
+                    polyPoints, leftEyePoints, rightEyePoints, eyePresets, text, selectedVoice
                 };
                 localStorage.setItem(draftKey, JSON.stringify(data));
                 setStatus("Draft saved!");
@@ -326,27 +309,34 @@
                 return inside;
             };
 
-            const getActivePoly = () => {
-                if (activeEdit === 'mouth') return polyPoints;
-                if (activeEdit === 'eyes') return leftEyePoints; // Treat as one, but apply to both
-                return [];
+            const findClickedPolygon = (point) => {
+                // Check which polygon (if any) was clicked
+                // Returns {type: 'mouth'|'leftEye'|'rightEye', points: array, pointIndex: number}
+
+                // Check mouth points
+                const mouthIdx = polyPoints.findIndex(p => isNearPoint(p, point));
+                if (mouthIdx !== -1) return { type: 'mouth', points: polyPoints, pointIndex: mouthIdx };
+
+                // Check left eye points
+                const leftEyeIdx = leftEyePoints.findIndex(p => isNearPoint(p, point));
+                if (leftEyeIdx !== -1) return { type: 'leftEye', points: leftEyePoints, pointIndex: leftEyeIdx };
+
+                // Check right eye points
+                const rightEyeIdx = rightEyePoints.findIndex(p => isNearPoint(p, point));
+                if (rightEyeIdx !== -1) return { type: 'rightEye', points: rightEyePoints, pointIndex: rightEyeIdx };
+
+                // Check if inside polygons (for dragging whole polygon)
+                if (polyPoints.length > 2 && pointInPoly(point, polyPoints)) return { type: 'mouth', points: polyPoints, pointIndex: -1 };
+                if (leftEyePoints.length > 2 && pointInPoly(point, leftEyePoints)) return { type: 'leftEye', points: leftEyePoints, pointIndex: -1 };
+                if (rightEyePoints.length > 2 && pointInPoly(point, rightEyePoints)) return { type: 'rightEye', points: rightEyePoints, pointIndex: -1 };
+
+                return null;
             };
 
-            const setActivePoly = (newPoints, isLeft = true) => {
-                if (activeEdit === 'mouth') {
-                    setPolyPoints(newPoints);
-                } else if (activeEdit === 'eyes') {
-                    if (isLeft) {
-                        setLeftEyePoints(newPoints);
-                        // Mirror to right eye
-                        const mirrorPoints = newPoints.map(p => ({ x: canvasRef.current.width - p.x, y: p.y })); // Assuming symmetry
-                        setRightEyePoints(mirrorPoints);
-                    } else {
-                        setRightEyePoints(newPoints);
-                        const mirrorPoints = newPoints.map(p => ({ x: canvasRef.current.width - p.x, y: p.y }));
-                        setLeftEyePoints(mirrorPoints);
-                    }
-                }
+            const updatePolygon = (type, newPoints) => {
+                if (type === 'mouth') setPolyPoints(newPoints);
+                else if (type === 'leftEye') setLeftEyePoints(newPoints);
+                else if (type === 'rightEye') setRightEyePoints(newPoints);
             };
 
             const handleMouseDown = (e) => {
@@ -361,15 +351,19 @@
                     return;
                 }
 
-                const activePoly = getActivePoly();
-                const idx = activePoly.findIndex(p => isNearPoint(p, m));
-                if (idx !== -1) { setDraggedPointIndex(idx); return; }
+                const clicked = findClickedPolygon(m);
+                if (!clicked) return;
 
-                if (activePoly.length > 2 && pointInPoly(m, activePoly)) {
+                if (clicked.pointIndex !== -1) {
+                    // Clicked on a point
+                    setDraggedPointIndex(clicked.pointIndex);
+                    setDraggedEye(clicked.type);
+                } else {
+                    // Clicked inside polygon (drag whole polygon)
                     setIsDraggingPoly(true);
+                    setDraggedEye(clicked.type);
                     polyDragStartRef.current = m;
-                    polyDragOrigRef.current = activePoly.map(p => ({ ...p }));
-                    return;
+                    polyDragOrigRef.current = clicked.points.map(p => ({ ...p }));
                 }
             };
 
@@ -383,29 +377,35 @@
                     return;
                 }
 
-                if (isDraggingPoly && polyDragStartRef.current && polyDragOrigRef.current) {
+                if (isDraggingPoly && polyDragStartRef.current && polyDragOrigRef.current && draggedEye) {
                     const dx = m.x - polyDragStartRef.current.x;
                     const dy = m.y - polyDragStartRef.current.y;
-                    setActivePoly(polyDragOrigRef.current.map(p => ({ x: p.x + dx, y: p.y + dy })));
+                    updatePolygon(draggedEye, polyDragOrigRef.current.map(p => ({ x: p.x + dx, y: p.y + dy })));
                     return;
                 }
 
-                if (draggedPointIndex !== null) {
-                    const newPoints = [...getActivePoly()];
+                if (draggedPointIndex !== null && draggedEye) {
+                    const currentPoints = draggedEye === 'mouth' ? polyPoints : (draggedEye === 'leftEye' ? leftEyePoints : rightEyePoints);
+                    const newPoints = [...currentPoints];
                     newPoints[draggedPointIndex] = m;
-                    setActivePoly(newPoints);
+                    updatePolygon(draggedEye, newPoints);
                     return;
                 }
 
-                const activePoly = getActivePoly();
+                // Update cursor based on what's under the mouse
                 let cursor = 'default';
-                if (activePoly.some(p => isNearPoint(p, m))) cursor = 'move';
-                else if (activePoly.length > 2 && pointInPoly(m, activePoly)) cursor = isDraggingPoly ? 'grabbing' : 'grab';
-                else {
-                    for (let i = 0; i < activePoly.length; i++) {
-                        const p1 = activePoly[i];
-                        const p2 = activePoly[(i + 1) % activePoly.length];
-                        if (distToSegment(m, p1, p2) < 5) cursor = 'copy';
+                const clicked = findClickedPolygon(m);
+                if (clicked) {
+                    if (clicked.pointIndex !== -1) cursor = 'move';
+                    else cursor = isDraggingPoly ? 'grabbing' : 'grab';
+                } else {
+                    // Check if near edge for adding points
+                    for (const {poly} of [{poly: polyPoints}, {poly: leftEyePoints}, {poly: rightEyePoints}]) {
+                        for (let i = 0; i < poly.length; i++) {
+                            const p1 = poly[i];
+                            const p2 = poly[(i + 1) % poly.length];
+                            if (distToSegment(m, p1, p2) < 5) cursor = 'copy';
+                        }
                     }
                 }
                 canvasRef.current.style.cursor = cursor;
@@ -418,8 +418,8 @@
 
                     if (boxRect.w > 10 && boxRect.h > 10) {
                         const pts = polyFromRect(boxRect);
-                        setActivePoly(pts);
-                        setStatus("Manual selection applied. Refine points or start animation.");
+                        setPolyPoints(pts); // Default to mouth for manual box
+                        setStatus("Manual mouth selection applied. Refine points or start animation.");
                         drawOverlay();
                     }
                     setBoxRect(null);
@@ -428,6 +428,7 @@
                 }
 
                 setDraggedPointIndex(null);
+                setDraggedEye(null);
                 setIsDraggingPoly(false);
                 polyDragStartRef.current = null;
                 polyDragOrigRef.current = null;
@@ -436,32 +437,38 @@
             const handleDoubleClick = (e) => {
                 if(isAnimating) return;
                 const m = getCoords(e);
-                const activePoly = getActivePoly();
-                const idx = activePoly.findIndex(p => isNearPoint(p, m));
-                if (idx !== -1) {
-                    if (activePoly.length > 3) setActivePoly(activePoly.filter((_, i) => i !== idx));
+
+                // Check all polygons for point removal
+                const clicked = findClickedPolygon(m);
+                if (clicked && clicked.pointIndex !== -1) {
+                    if (clicked.points.length > 3) {
+                        const filtered = clicked.points.filter((_, i) => i !== clicked.pointIndex);
+                        updatePolygon(clicked.type, filtered);
+                    }
                     return;
                 }
-                for (let i=0; i<activePoly.length; i++) {
-                    const p1 = activePoly[i];
-                    const p2 = activePoly[(i+1)%activePoly.length];
-                    if (distToSegment(m, p1, p2) < 5) {
-                        const newPoints = [...activePoly];
-                        newPoints.splice(i+1, 0, m);
-                        setActivePoly(newPoints);
-                        return;
+
+                // Check all polygons for adding points on edges
+                for (const {type, points} of [{type: 'mouth', points: polyPoints}, {type: 'leftEye', points: leftEyePoints}, {type: 'rightEye', points: rightEyePoints}]) {
+                    for (let i = 0; i < points.length; i++) {
+                        const p1 = points[i];
+                        const p2 = points[(i + 1) % points.length];
+                        if (distToSegment(m, p1, p2) < 5) {
+                            const newPoints = [...points];
+                            newPoints.splice(i + 1, 0, m);
+                            updatePolygon(type, newPoints);
+                            return;
+                        }
                     }
                 }
             };
 
-            // Parse eye sequence
-            const parseEyeSequence = (seq) => {
-                const actions = [];
-                seq.split(',').forEach(s => {
-                    const [time, action] = s.trim().split(':');
-                    if (time && action) actions.push({ time: parseFloat(time), action });
-                });
-                return actions;
+            const toggleEyePreset = (preset) => {
+                if (eyePresets.includes(preset)) {
+                    setEyePresets(eyePresets.filter(p => p !== preset));
+                } else {
+                    setEyePresets([...eyePresets, preset]);
+                }
             };
 
             // --- 3D DENTAL ENGINE ---
@@ -855,18 +862,9 @@
                         const i0 = (y0 * w + x) * 4;
                         const i1 = Math.min((y0 + 1) * w * 4, eyeBuffer.length - 4);
 
-                        let r = Math.round(eyeBuffer[i0] * (1 - t) + eyeBuffer[i1] * t);
-                        let g = Math.round(eyeBuffer[i0 + 1] * (1 - t) + eyeBuffer[i1 + 1] * t);
-                        let b = Math.round(eyeBuffer[i0 + 2] * (1 - t) + eyeBuffer[i1 + 2] * t);
-
-                        // Apply color filter
-                        let [hslH, hslS, hslL] = rgbToHsl(r, g, b);
-                        hslH = (hslH + eyeParams.current.eyeHue / 360) % 1;
-                        hslS *= eyeParams.current.eyeSaturation;
-                        hslL += eyeParams.current.eyeBrightness / 100;
-                        hslL = Math.max(0, Math.min(1, hslL));
-                        hslS = Math.max(0, Math.min(1, hslS));
-                        [r, g, b] = hslToRgb(hslH, hslS, hslL);
+                        const r = Math.round(eyeBuffer[i0] * (1 - t) + eyeBuffer[i1] * t);
+                        const g = Math.round(eyeBuffer[i0 + 1] * (1 - t) + eyeBuffer[i1 + 1] * t);
+                        const b = Math.round(eyeBuffer[i0 + 2] * (1 - t) + eyeBuffer[i1 + 2] * t);
 
                         dst[idx] = r;
                         dst[idx + 1] = g;
@@ -1048,15 +1046,11 @@
                 let prevTarget = 0;
                 let plosiveHold = 0;
                 let plosivePrev = 0;
-                let blinkTimer = 0;
-                let currentEyeState = eyeState;
-                let rollAngle = 0;
-                let currentPupilX = pupilX;
-                let currentPupilY = pupilY;
-                const eyeActions = parseEyeSequence(eyeSequence);
-                let actionIndex = 0;
-                let saccadeTimer = 0;
-                let saccadeX = 0, saccadeY = 0;
+                let eyeStateTimer = 0;
+                let currentEyeState = 'normal';
+                let currentPupilX = 0;
+                let currentPupilY = 0;
+                let eyeStateDuration = 0; // How long to hold current eye state
 
                 const loop = () => {
                     const elapsed = (Date.now() - startTime) / 1000;
@@ -1131,55 +1125,45 @@
 
                     processFrame(openPixels, ctx, bounds, mouthBuffer, maskData);
 
-                    // Eye animation
-                    blinkTimer += 1 / 60;
-                    saccadeTimer += 1 / 60;
+                    // Eye animation - randomly select from chosen presets
+                    eyeStateTimer += 1 / 60;
                     let eyeOpen = 1;
-                    currentEyeState = eyeState;
-                    rollAngle = (rollAngle + 5) % 360; // Slow rotation for roll
 
-                    // Sequence
-                    if (eyeActions.length > 0 && actionIndex < eyeActions.length) {
-                        if (elapsed >= eyeActions[actionIndex].time) {
-                            currentEyeState = eyeActions[actionIndex].action;
-                            if (currentEyeState.startsWith('look_')) {
-                                // Parse look direction, e.g., look_left: set pupilX/Y
-                                if (currentEyeState === 'look_left') { currentPupilX = -1; currentPupilY = 0; }
-                                if (currentEyeState === 'look_right') { currentPupilX = 1; currentPupilY = 0; }
-                                if (currentEyeState === 'look_up') { currentPupilX = 0; currentPupilY = -1; }
-                                if (currentEyeState === 'look_down') { currentPupilX = 0; currentPupilY = 1; }
-                            }
-                            actionIndex++;
+                    // Check if it's time to change eye state
+                    if (eyeStateTimer >= eyeStateDuration) {
+                        eyeStateTimer = 0;
+                        // Randomly pick a preset from the selected list, or stay normal
+                        if (eyePresets.length > 0 && Math.random() < 0.3) {
+                            const randomIndex = Math.floor(Math.random() * eyePresets.length);
+                            currentEyeState = eyePresets[randomIndex];
+
+                            // Set pupil position based on state
+                            if (currentEyeState === 'look_left') { currentPupilX = -0.7; currentPupilY = 0; }
+                            else if (currentEyeState === 'look_right') { currentPupilX = 0.7; currentPupilY = 0; }
+                            else if (currentEyeState === 'look_up') { currentPupilX = 0; currentPupilY = -0.7; }
+                            else if (currentEyeState === 'look_down') { currentPupilX = 0; currentPupilY = 0.7; }
+                            else { currentPupilX = 0; currentPupilY = 0; }
+
+                            // Duration depends on action type
+                            if (currentEyeState === 'blink') eyeStateDuration = 0.15; // Quick blink
+                            else if (currentEyeState === 'wink') eyeStateDuration = 0.3; // Wink
+                            else eyeStateDuration = 0.8 + Math.random() * 1.5; // Look around
+                        } else {
+                            currentEyeState = 'normal';
+                            currentPupilX = 0;
+                            currentPupilY = 0;
+                            eyeStateDuration = 1.0 + Math.random() * 2.0; // Stay normal for a bit
                         }
-                    }
-
-                    // Random
-                    if (randomEyes) {
-                        if (Math.random() < 0.01) currentEyeState = 'blink'; // Random blink
-                        if (saccadeTimer > 0.5) {
-                            saccadeTimer = 0;
-                            saccadeX = (Math.random() - 0.5) * 0.5;
-                            saccadeY = (Math.random() - 0.5) * 0.5;
-                        }
-                        currentPupilX += saccadeX;
-                        currentPupilY += saccadeY;
-                    }
-
-                    // Logical based on audio
-                    if (logicalEyes) {
-                        if (plos > 0.5) currentEyeState = 'blink'; // Blink on plosives
-                        if (vowel > 0.7) eyeOpen = 1.2; // Wide on vowels
-                        if (cons > 0.6) eyeOpen = 0.8; // Squint on consonants
                     }
 
                     // Set open based on state
-                    if (currentEyeState === 'squint') eyeOpen = 0.4;
-                    else if (currentEyeState === 'wide') eyeOpen = 1.5;
-                    else if (currentEyeState === 'blink' || currentEyeState === 'close') eyeOpen = 0;
-                    else if (currentEyeState === 'roll') eyeOpen = 0.8;
+                    if (currentEyeState === 'blink') eyeOpen = 0;
+                    else if (currentEyeState === 'wink') eyeOpen = 0; // Will only affect one eye in future
+                    else if (currentEyeState === 'glare') eyeOpen = 0.4;
+                    else eyeOpen = 1;
 
-                    if (leftEyePoints.length > 2) processEyeFrame(eyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY, currentEyeState === 'roll' ? rollAngle : 0);
-                    if (rightEyePoints.length > 2) processEyeFrame(eyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY, currentEyeState === 'roll' ? rollAngle : 0);
+                    if (leftEyePoints.length > 2) processEyeFrame(eyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY, 0);
+                    if (rightEyePoints.length > 2) processEyeFrame(eyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY, 0);
 
                     animationFrameRef.current = requestAnimationFrame(loop);
                 };
@@ -1317,8 +1301,8 @@
                     polyPoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
                 }
 
-                // Eyes with pupils in overlay for editing
-                const drawEyeOverlay = (eyePoints, isLeft) => {
+                // Eyes overlay for editing
+                const drawEyeOverlay = (eyePoints) => {
                     if (eyePoints.length > 0) {
                         ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2;
                         ctx.beginPath();
@@ -1328,19 +1312,10 @@
 
                         ctx.fillStyle = '#fff';
                         eyePoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill(); });
-
-                        // Draw pupil preview
-                        const eb = getBounds(eyePoints);
-                        const ecx = eb.x + eb.width / 2;
-                        const ecy = eb.y + eb.height / 2;
-                        ctx.fillStyle = 'black';
-                        ctx.beginPath();
-                        ctx.arc(ecx + pupilX * (eb.width / 4), ecy + pupilY * (eb.height / 4), Math.min(eb.width, eb.height) * 0.15, 0, Math.PI * 2);
-                        ctx.fill();
                     }
                 };
-                drawEyeOverlay(leftEyePoints, true);
-                drawEyeOverlay(rightEyePoints, false);
+                drawEyeOverlay(leftEyePoints);
+                drawEyeOverlay(rightEyePoints);
 
                 // Guides for mouth
                 if (polyPoints.length > 0) {
@@ -1408,13 +1383,6 @@
                             </div>
                         </div>
 
-                        <div className="panel">
-                            <h3>Edit Mode</h3>
-                            <div className="tabs">
-                                <div className={`tab ${activeEdit === 'mouth' ? 'active' : ''}`} onClick={() => setActiveEdit('mouth')}>Mouth</div>
-                                <div className={`tab ${activeEdit === 'eyes' ? 'active' : ''}`} onClick={() => setActiveEdit('eyes')}>Eyes</div>
-                            </div>
-                        </div>
 
                         <div className="panel">
                             <h3>Audio Source</h3>
@@ -1527,40 +1495,57 @@
                         </div>
 
                         <div className="panel">
-                            <h3>Eye Controls</h3>
-                            <div className="slider-row">
-                                <label>Pupil X</label>
-                                <input type="range" min="-1" max="1" step="0.1" value={pupilX} onChange={e=>setPupilX(Number(e.target.value))} />
-                            </div>
-                            <div className="slider-row">
-                                <label>Pupil Y</label>
-                                <input type="range" min="-1" max="1" step="0.1" value={pupilY} onChange={e=>setPupilY(Number(e.target.value))} />
-                            </div>
-                            <div className="slider-row">
-                                <label>Eye Brightness</label>
-                                <input type="range" min="-50" max="50" step="5" value={eyeBrightness} onChange={e=>setEyeBrightness(Number(e.target.value))} />
-                            </div>
-                            <div className="slider-row">
-                                <label>Eye Hue</label>
-                                <input type="range" min="-180" max="180" step="10" value={eyeHue} onChange={e=>setEyeHue(Number(e.target.value))} />
-                            </div>
-                            <div className="slider-row">
-                                <label>Eye Saturation</label>
-                                <input type="range" min="0" max="2" step="0.1" value={eyeSaturation} onChange={e=>setEyeSaturation(Number(e.target.value))} />
+                            <h3>Eye Animation Presets</h3>
+                            <p style={{fontSize: '0.75rem', color: '#888', marginBottom: '10px'}}>
+                                Select actions to randomly apply during animation:
+                            </p>
+                            <div className="btn-row">
+                                <button
+                                    className={`btn ${eyePresets.includes('blink') ? 'btn-primary' : ''}`}
+                                    onClick={() => toggleEyePreset('blink')}
+                                >
+                                    Blink
+                                </button>
+                                <button
+                                    className={`btn ${eyePresets.includes('wink') ? 'btn-primary' : ''}`}
+                                    onClick={() => toggleEyePreset('wink')}
+                                >
+                                    Wink
+                                </button>
+                                <button
+                                    className={`btn ${eyePresets.includes('glare') ? 'btn-primary' : ''}`}
+                                    onClick={() => toggleEyePreset('glare')}
+                                >
+                                    Glare
+                                </button>
                             </div>
                             <div className="btn-row">
-                                <button className="btn" onClick={() => setEyeState('squint')}>Squint</button>
-                                <button className="btn" onClick={() => setEyeState('wide')}>Wide</button>
-                                <button className="btn" onClick={() => setEyeState('blink')}>Blink</button>
-                                <button className="btn" onClick={() => setEyeState('close')}>Close</button>
-                                <button className="btn" onClick={() => setEyeState('roll')}>Roll</button>
-                                <button className="btn" onClick={() => setEyeState('normal')}>Normal</button>
+                                <button
+                                    className={`btn ${eyePresets.includes('look_left') ? 'btn-primary' : ''}`}
+                                    onClick={() => toggleEyePreset('look_left')}
+                                >
+                                    Look Left
+                                </button>
+                                <button
+                                    className={`btn ${eyePresets.includes('look_right') ? 'btn-primary' : ''}`}
+                                    onClick={() => toggleEyePreset('look_right')}
+                                >
+                                    Look Right
+                                </button>
                             </div>
-                            <label>Eye Sequence (time:action, e.g., 0:normal,2:blink,3:look_left)</label>
-                            <textarea value={eyeSequence} onChange={e => setEyeSequence(e.target.value)} style={{width: '100%', height: '50px'}} />
                             <div className="btn-row">
-                                <button className="btn" onClick={() => setRandomEyes(!randomEyes)}>{randomEyes ? 'Disable Random' : 'Enable Random'}</button>
-                                <button className="btn" onClick={() => setLogicalEyes(!logicalEyes)}>{logicalEyes ? 'Disable Logical' : 'Enable Logical'}</button>
+                                <button
+                                    className={`btn ${eyePresets.includes('look_up') ? 'btn-primary' : ''}`}
+                                    onClick={() => toggleEyePreset('look_up')}
+                                >
+                                    Look Up
+                                </button>
+                                <button
+                                    className={`btn ${eyePresets.includes('look_down') ? 'btn-primary' : ''}`}
+                                    onClick={() => toggleEyePreset('look_down')}
+                                >
+                                    Look Down
+                                </button>
                             </div>
                         </div>
 
