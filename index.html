@@ -89,8 +89,12 @@
             const [draggedEye, setDraggedEye] = React.useState(null); // 'left', 'right', 'leftBrow', 'rightBrow'
 
             // Zoom/Magnification for fine-tuning
-            const [zoomMode, setZoomMode] = React.useState(null); // 'mouth', 'leftEye', 'rightEye', 'leftEyebrow', 'rightEyebrow', or null
-            const [zoomScale, setZoomScale] = React.useState(2.5);
+            const [isZoomed, setIsZoomed] = React.useState(false);
+            const [zoomScale, setZoomScale] = React.useState(1.0); // Start at 1.0 (no zoom)
+            const [panOffset, setPanOffset] = React.useState({ x: 0, y: 0 });
+            const [isPanning, setIsPanning] = React.useState(false);
+            const panStartRef = React.useRef(null);
+            const panOffsetStartRef = React.useRef(null);
 
             // Feature toggles
             const [enableMouth, setEnableMouth] = React.useState(true);
@@ -245,7 +249,7 @@
                     generateMouthTexture(bounds.width, bounds.height);
                     drawOverlay();
                 }
-            }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints, zoomMode, zoomScale]);
+            }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints, isZoomed, zoomScale, panOffset]);
 
             React.useEffect(() => {
                 const init = async () => {
@@ -362,9 +366,20 @@
                     canvasY = (e.clientY - rect.top) * scaleY;
                 }
 
-                // If in zoom mode, transform coordinates back to original image space
-                if (zoomMode && canvasRef.current.zoomTransform) {
-                    return transformFromZoom({ x: canvasX, y: canvasY });
+                // If zoomed, transform coordinates back to original image space
+                if (isZoomed && zoomScale > 1.0) {
+                    const imageWidth = canvasRef.current.width;
+                    const imageHeight = canvasRef.current.height;
+
+                    // Calculate the zoomed viewport dimensions
+                    const viewportWidth = imageWidth / zoomScale;
+                    const viewportHeight = imageHeight / zoomScale;
+
+                    // Transform canvas coordinates to image coordinates
+                    const imageX = (canvasX / imageWidth) * viewportWidth + panOffset.x;
+                    const imageY = (canvasY / imageHeight) * viewportHeight + panOffset.y;
+
+                    return { x: imageX, y: imageY };
                 }
 
                 return { x: canvasX, y: canvasY };
@@ -466,17 +481,73 @@
 
             const handleMouseDown = (e) => {
                 if (isAnimating || !image) return;
-                const m = getCoords(e);
 
+                // For manual box mode, use raw canvas coordinates
                 if (manualBoxMode || e.shiftKey) {
+                    const rect = canvasRef.current.getBoundingClientRect();
+                    const scaleX = canvasRef.current.width / rect.width;
+                    const scaleY = canvasRef.current.height / rect.height;
+                    let canvasX, canvasY;
+                    if (e.touches && e.touches.length > 0) {
+                        canvasX = (e.touches[0].clientX - rect.left) * scaleX;
+                        canvasY = (e.touches[0].clientY - rect.top) * scaleY;
+                    } else {
+                        canvasX = (e.clientX - rect.left) * scaleX;
+                        canvasY = (e.clientY - rect.top) * scaleY;
+                    }
                     setIsBoxSelecting(true);
-                    boxStartRef.current = m;
-                    setBoxRect({ x: m.x, y: m.y, w: 0, h: 0 });
-                    drawBoxOverlay({ x: m.x, y: m.y, w: 0, h: 0 });
+                    boxStartRef.current = { x: canvasX, y: canvasY };
+                    setBoxRect({ x: canvasX, y: canvasY, w: 0, h: 0 });
+                    drawBoxOverlay({ x: canvasX, y: canvasY, w: 0, h: 0 });
                     return;
                 }
 
+                const m = getCoords(e);
                 const clicked = findClickedPolygon(m);
+
+                // If zoomed in
+                if (isZoomed && zoomScale > 1.0) {
+                    if (clicked) {
+                        // Clicked on a polygon while zoomed - auto-exit zoom and start dragging
+                        setIsZoomed(false);
+                        setZoomScale(1.0);
+                        setPanOffset({ x: 0, y: 0 });
+
+                        // Start dragging after a brief delay to let zoom reset
+                        setTimeout(() => {
+                            if (clicked.pointIndex !== -1) {
+                                setDraggedPointIndex(clicked.pointIndex);
+                                setDraggedEye(clicked.type);
+                            } else {
+                                setIsDraggingPoly(true);
+                                setDraggedEye(clicked.type);
+                                polyDragStartRef.current = m;
+                                polyDragOrigRef.current = clicked.points.map(p => ({ ...p }));
+                            }
+                        }, 50);
+                    } else {
+                        // Start panning
+                        setIsPanning(true);
+                        const rect = canvasRef.current.getBoundingClientRect();
+                        const scaleX = canvasRef.current.width / rect.width;
+                        const scaleY = canvasRef.current.height / rect.height;
+                        if (e.touches && e.touches.length > 0) {
+                            panStartRef.current = {
+                                x: (e.touches[0].clientX - rect.left) * scaleX,
+                                y: (e.touches[0].clientY - rect.top) * scaleY
+                            };
+                        } else {
+                            panStartRef.current = {
+                                x: (e.clientX - rect.left) * scaleX,
+                                y: (e.clientY - rect.top) * scaleY
+                            };
+                        }
+                        panOffsetStartRef.current = { ...panOffset };
+                    }
+                    return;
+                }
+
+                // Normal mode (not zoomed) - allow dragging
                 if (!clicked) return;
 
                 if (clicked.pointIndex !== -1) {
@@ -494,6 +565,46 @@
 
             const handleMouseMove = (e) => {
                 if (!image) return;
+
+                // Handle panning when zoomed
+                if (isPanning && panStartRef.current && panOffsetStartRef.current) {
+                    const rect = canvasRef.current.getBoundingClientRect();
+                    const scaleX = canvasRef.current.width / rect.width;
+                    const scaleY = canvasRef.current.height / rect.height;
+
+                    let currentX, currentY;
+                    if (e.touches && e.touches.length > 0) {
+                        currentX = (e.touches[0].clientX - rect.left) * scaleX;
+                        currentY = (e.touches[0].clientY - rect.top) * scaleY;
+                    } else {
+                        currentX = (e.clientX - rect.left) * scaleX;
+                        currentY = (e.clientY - rect.top) * scaleY;
+                    }
+
+                    const dx = currentX - panStartRef.current.x;
+                    const dy = currentY - panStartRef.current.y;
+
+                    const imageWidth = canvasRef.current.width;
+                    const imageHeight = canvasRef.current.height;
+                    const viewportWidth = imageWidth / zoomScale;
+                    const viewportHeight = imageHeight / zoomScale;
+
+                    // Convert canvas pixel movement to image space movement
+                    const imageDx = (dx / imageWidth) * viewportWidth;
+                    const imageDy = (dy / imageHeight) * viewportHeight;
+
+                    let newPanX = panOffsetStartRef.current.x - imageDx;
+                    let newPanY = panOffsetStartRef.current.y - imageDy;
+
+                    // Clamp pan offset to keep image within bounds
+                    newPanX = Math.max(0, Math.min(imageWidth - viewportWidth, newPanX));
+                    newPanY = Math.max(0, Math.min(imageHeight - viewportHeight, newPanY));
+
+                    setPanOffset({ x: newPanX, y: newPanY });
+                    drawOverlay();
+                    return;
+                }
+
                 const m = getCoords(e);
 
                 if (isBoxSelecting && boxStartRef.current) {
@@ -567,6 +678,11 @@
                     saveToHistory();
                 }
 
+                // Clear panning state
+                setIsPanning(false);
+                panStartRef.current = null;
+                panOffsetStartRef.current = null;
+
                 setDraggedPointIndex(null);
                 setDraggedEye(null);
                 setIsDraggingPoly(false);
@@ -631,57 +747,6 @@
                 } else {
                     setEyePresets([...eyePresets, preset]);
                 }
-            };
-
-            // Add point on nearest edge in zoom mode
-            const addPointInZoom = () => {
-                if (!zoomMode) return;
-
-                // Get the polygon we're zooming
-                let points = [];
-                let type = '';
-                if (zoomMode === 'mouth') { points = polyPoints; type = 'mouth'; }
-                else if (zoomMode === 'leftEye') { points = leftEyePoints; type = 'leftEye'; }
-                else if (zoomMode === 'rightEye') { points = rightEyePoints; type = 'rightEye'; }
-                else if (zoomMode === 'leftEyebrow') { points = leftEyebrowPoints; type = 'leftBrow'; }
-                else if (zoomMode === 'rightEyebrow') { points = rightEyebrowPoints; type = 'rightBrow'; }
-
-                if (points.length < 2) return;
-
-                // Find the center of the polygon
-                const bounds = getBounds(points);
-                const centerPoint = {
-                    x: bounds.x + bounds.width / 2,
-                    y: bounds.y + bounds.height / 2
-                };
-
-                // Find the closest edge to the center
-                let closestDistance = Infinity;
-                let closestIndex = 0;
-
-                for (let i = 0; i < points.length; i++) {
-                    const p1 = points[i];
-                    const p2 = points[(i + 1) % points.length];
-                    const dist = distToSegment(centerPoint, p1, p2);
-                    if (dist < closestDistance) {
-                        closestDistance = dist;
-                        closestIndex = i;
-                    }
-                }
-
-                // Add a point at the midpoint of the closest edge
-                const p1 = points[closestIndex];
-                const p2 = points[(closestIndex + 1) % points.length];
-                const newPoint = {
-                    x: (p1.x + p2.x) / 2,
-                    y: (p1.y + p2.y) / 2
-                };
-
-                const newPoints = [...points];
-                newPoints.splice(closestIndex + 1, 0, newPoint);
-                updatePolygon(type, newPoints);
-                saveToHistory();
-                drawOverlay();
             };
 
             // --- 3D DENTAL ENGINE ---
@@ -1586,135 +1651,81 @@
                 setIsDetecting(false);
             };
 
-            const transformToZoom = (point) => {
-                const transform = canvasRef.current.zoomTransform;
-                if (!transform) return point;
-                return {
-                    x: transform.offsetX + (point.x - transform.bounds.x) * transform.scale,
-                    y: transform.offsetY + (point.y - transform.bounds.y) * transform.scale
-                };
-            };
-
-            const transformFromZoom = (point) => {
-                const transform = canvasRef.current.zoomTransform;
-                if (!transform) return point;
-                return {
-                    x: (point.x - transform.offsetX) / transform.scale + transform.bounds.x,
-                    y: (point.y - transform.offsetY) / transform.scale + transform.bounds.y
-                };
-            };
-
             const drawOverlay = () => {
                 const ctx = canvasRef.current.getContext('2d');
 
-                // If in zoom mode, draw zoomed view
-                if (zoomMode && originalImageDataRef.current) {
-                    let zoomPoints = [];
-                    if (zoomMode === 'mouth') zoomPoints = polyPoints;
-                    else if (zoomMode === 'leftEye') zoomPoints = leftEyePoints;
-                    else if (zoomMode === 'rightEye') zoomPoints = rightEyePoints;
-                    else if (zoomMode === 'leftEyebrow') zoomPoints = leftEyebrowPoints;
-                    else if (zoomMode === 'rightEyebrow') zoomPoints = rightEyebrowPoints;
+                // Helper function to transform points from image space to canvas space when zoomed
+                const transformPointToCanvas = (p) => {
+                    if (!isZoomed || zoomScale <= 1.0) return p;
 
-                    if (zoomPoints.length > 0) {
-                        const bounds = getBounds(zoomPoints);
-                        const padding = 50;
-                        const zoomBounds = {
-                            x: Math.max(0, bounds.x - padding),
-                            y: Math.max(0, bounds.y - padding),
-                            width: Math.min(canvasRef.current.width - bounds.x + padding, bounds.width + padding * 2),
-                            height: Math.min(canvasRef.current.height - bounds.y + padding, bounds.height + padding * 2)
-                        };
+                    const imageWidth = canvasRef.current.width;
+                    const imageHeight = canvasRef.current.height;
+                    const viewportWidth = imageWidth / zoomScale;
+                    const viewportHeight = imageHeight / zoomScale;
 
-                        const tempCanvas = document.createElement('canvas');
-                        tempCanvas.width = canvasRef.current.width;
-                        tempCanvas.height = canvasRef.current.height;
-                        const tempCtx = tempCanvas.getContext('2d');
-                        tempCtx.putImageData(originalImageDataRef.current, 0, 0);
+                    const canvasX = ((p.x - panOffset.x) / viewportWidth) * imageWidth;
+                    const canvasY = ((p.y - panOffset.y) / viewportHeight) * imageHeight;
 
-                        ctx.fillStyle = '#000';
-                        ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                    return { x: canvasX, y: canvasY };
+                };
 
-                        const scaledWidth = zoomBounds.width * zoomScale;
-                        const scaledHeight = zoomBounds.height * zoomScale;
-                        const offsetX = (canvasRef.current.width - scaledWidth) / 2;
-                        const offsetY = (canvasRef.current.height - scaledHeight) / 2;
-
-                        ctx.drawImage(
-                            tempCanvas,
-                            zoomBounds.x, zoomBounds.y, zoomBounds.width, zoomBounds.height,
-                            offsetX, offsetY, scaledWidth, scaledHeight
-                        );
-
-                        canvasRef.current.zoomTransform = {
-                            bounds: zoomBounds,
-                            offsetX,
-                            offsetY,
-                            scale: zoomScale
-                        };
-
-                        const drawZoomedPoints = (points, color) => {
-                            if (points.length === 0) return;
-                            ctx.strokeStyle = color;
-                            ctx.lineWidth = 3;
-                            ctx.beginPath();
-                            const firstPt = transformToZoom(points[0]);
-                            ctx.moveTo(firstPt.x, firstPt.y);
-                            for (let i = 1; i < points.length; i++) {
-                                const pt = transformToZoom(points[i]);
-                                ctx.lineTo(pt.x, pt.y);
-                            }
-                            ctx.closePath();
-                            ctx.stroke();
-
-                            ctx.fillStyle = '#fff';
-                            points.forEach(p => {
-                                const pt = transformToZoom(p);
-                                ctx.beginPath();
-                                ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
-                                ctx.fill();
-                            });
-                        };
-
-                        if (zoomMode === 'mouth') {
-                            drawZoomedPoints(polyPoints, '#ff00ff');
-                        } else if (zoomMode === 'leftEye') {
-                            drawZoomedPoints(leftEyePoints, '#00ff00');
-                            drawZoomedPoints(leftEyebrowPoints, '#ffaa00');
-                        } else if (zoomMode === 'rightEye') {
-                            drawZoomedPoints(rightEyePoints, '#00ff00');
-                            drawZoomedPoints(rightEyebrowPoints, '#ffaa00');
-                        } else if (zoomMode === 'leftEyebrow') {
-                            drawZoomedPoints(leftEyebrowPoints, '#ffaa00');
-                            drawZoomedPoints(leftEyePoints, '#00ff00'); // Show eye too for context
-                        } else if (zoomMode === 'rightEyebrow') {
-                            drawZoomedPoints(rightEyebrowPoints, '#ffaa00');
-                            drawZoomedPoints(rightEyePoints, '#00ff00'); // Show eye too for context
-                        }
-
-                        ctx.fillStyle = '#00ff99';
-                        ctx.font = '14px sans-serif';
-                        ctx.fillText(`ZOOM: ${zoomMode.toUpperCase()} (${zoomScale.toFixed(1)}x)`, 20, 30);
-                        ctx.fillText('Click "Exit Zoom" to return', 20, 50);
-
-                        return;
-                    }
+                // Create a temporary canvas with the original image
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = canvasRef.current.width;
+                tempCanvas.height = canvasRef.current.height;
+                const tempCtx = tempCanvas.getContext('2d');
+                if (originalImageDataRef.current) {
+                    tempCtx.putImageData(originalImageDataRef.current, 0, 0);
                 }
 
-                // Normal overlay
-                if (originalImageDataRef.current) ctx.putImageData(originalImageDataRef.current, 0, 0);
-                canvasRef.current.zoomTransform = null;
+                // Clear the main canvas
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+
+                // If zoomed, draw the zoomed portion
+                if (isZoomed && zoomScale > 1.0) {
+                    const imageWidth = canvasRef.current.width;
+                    const imageHeight = canvasRef.current.height;
+                    const viewportWidth = imageWidth / zoomScale;
+                    const viewportHeight = imageHeight / zoomScale;
+
+                    // Draw the zoomed portion of the image
+                    ctx.drawImage(
+                        tempCanvas,
+                        panOffset.x, panOffset.y, viewportWidth, viewportHeight,
+                        0, 0, imageWidth, imageHeight
+                    );
+
+                    // Display zoom indicator
+                    ctx.fillStyle = '#00ff99';
+                    ctx.font = '14px sans-serif';
+                    ctx.fillText(`ZOOM: ${zoomScale.toFixed(1)}x - Drag to pan, click selection to reposition`, 20, 30);
+                } else {
+                    // Normal view - just draw the image
+                    if (originalImageDataRef.current) {
+                        ctx.putImageData(originalImageDataRef.current, 0, 0);
+                    }
+                }
 
                 // Mouth
                 if (enableMouth && polyPoints.length > 0) {
                     ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2;
                     ctx.beginPath();
-                    ctx.moveTo(polyPoints[0].x, polyPoints[0].y);
-                    for (let i = 1; i < polyPoints.length; i++) ctx.lineTo(polyPoints[i].x, polyPoints[i].y);
+                    const firstPt = transformPointToCanvas(polyPoints[0]);
+                    ctx.moveTo(firstPt.x, firstPt.y);
+                    for (let i = 1; i < polyPoints.length; i++) {
+                        const pt = transformPointToCanvas(polyPoints[i]);
+                        ctx.lineTo(pt.x, pt.y);
+                    }
                     ctx.closePath(); ctx.stroke();
 
                     ctx.fillStyle = '#fff';
-                    polyPoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
+                    polyPoints.forEach(p => {
+                        const pt = transformPointToCanvas(p);
+                        ctx.beginPath();
+                        ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
                 }
 
                 // Eyes overlay for editing
@@ -1722,12 +1733,21 @@
                     if (eyePoints.length > 0) {
                         ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2;
                         ctx.beginPath();
-                        ctx.moveTo(eyePoints[0].x, eyePoints[0].y);
-                        for (let i = 1; i < eyePoints.length; i++) ctx.lineTo(eyePoints[i].x, eyePoints[i].y);
+                        const firstPt = transformPointToCanvas(eyePoints[0]);
+                        ctx.moveTo(firstPt.x, firstPt.y);
+                        for (let i = 1; i < eyePoints.length; i++) {
+                            const pt = transformPointToCanvas(eyePoints[i]);
+                            ctx.lineTo(pt.x, pt.y);
+                        }
                         ctx.closePath(); ctx.stroke();
 
                         ctx.fillStyle = '#fff';
-                        eyePoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill(); });
+                        eyePoints.forEach(p => {
+                            const pt = transformPointToCanvas(p);
+                            ctx.beginPath();
+                            ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
+                            ctx.fill();
+                        });
                     }
                 };
                 if (enableEyes) {
@@ -1740,13 +1760,22 @@
                     if (browPoints.length > 0) {
                         ctx.strokeStyle = '#ffaa00'; ctx.lineWidth = 2;
                         ctx.beginPath();
-                        ctx.moveTo(browPoints[0].x, browPoints[0].y);
-                        for (let i = 1; i < browPoints.length; i++) ctx.lineTo(browPoints[i].x, browPoints[i].y);
+                        const firstPt = transformPointToCanvas(browPoints[0]);
+                        ctx.moveTo(firstPt.x, firstPt.y);
+                        for (let i = 1; i < browPoints.length; i++) {
+                            const pt = transformPointToCanvas(browPoints[i]);
+                            ctx.lineTo(pt.x, pt.y);
+                        }
                         ctx.closePath();
                         ctx.stroke();
 
                         ctx.fillStyle = '#ffaa00';
-                        browPoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill(); });
+                        browPoints.forEach(p => {
+                            const pt = transformPointToCanvas(p);
+                            ctx.beginPath();
+                            ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
+                            ctx.fill();
+                        });
                     }
                 };
                 if (enableEyebrows) {
@@ -1825,87 +1854,27 @@
                                 <button className="btn btn-danger" onClick={resetAll}>Reset</button>
                             </div>
 
-                            <h3 style={{marginTop: 15, fontSize: '0.9rem'}}>Zoom for Fine-Tuning</h3>
+                            <h3 style={{marginTop: 15, fontSize: '0.9rem'}}>Zoom & Pan</h3>
                             <div className="btn-row">
                                 <button
-                                    className={`btn ${zoomMode === 'mouth' ? 'btn-primary' : ''}`}
+                                    className={`btn ${isZoomed ? 'btn-primary' : ''}`}
                                     onClick={() => {
-                                        if (zoomMode === 'mouth') {
-                                            setZoomMode(null);
-                                            setZoomScale(2.5);
+                                        if (isZoomed) {
+                                            setIsZoomed(false);
+                                            setZoomScale(1.0);
+                                            setPanOffset({ x: 0, y: 0 });
                                         } else {
-                                            setZoomMode('mouth');
+                                            setIsZoomed(true);
+                                            setZoomScale(2.5);
                                         }
                                         setTimeout(drawOverlay, 10);
                                     }}
-                                    disabled={!image || isAnimating || polyPoints.length === 0}
+                                    disabled={!image || isAnimating}
                                 >
-                                    {zoomMode === 'mouth' ? 'Exit Zoom' : 'Zoom Mouth'}
-                                </button>
-                                <button
-                                    className={`btn ${zoomMode === 'leftEye' ? 'btn-primary' : ''}`}
-                                    onClick={() => {
-                                        if (zoomMode === 'leftEye') {
-                                            setZoomMode(null);
-                                            setZoomScale(2.5);
-                                        } else {
-                                            setZoomMode('leftEye');
-                                        }
-                                        setTimeout(drawOverlay, 10);
-                                    }}
-                                    disabled={!image || isAnimating || leftEyePoints.length === 0}
-                                >
-                                    {zoomMode === 'leftEye' ? 'Exit Zoom' : 'Zoom L-Eye'}
-                                </button>
-                                <button
-                                    className={`btn ${zoomMode === 'rightEye' ? 'btn-primary' : ''}`}
-                                    onClick={() => {
-                                        if (zoomMode === 'rightEye') {
-                                            setZoomMode(null);
-                                            setZoomScale(2.5);
-                                        } else {
-                                            setZoomMode('rightEye');
-                                        }
-                                        setTimeout(drawOverlay, 10);
-                                    }}
-                                    disabled={!image || isAnimating || rightEyePoints.length === 0}
-                                >
-                                    {zoomMode === 'rightEye' ? 'Exit Zoom' : 'Zoom R-Eye'}
+                                    {isZoomed ? 'Zoom Out' : 'Zoom In'}
                                 </button>
                             </div>
-                            <div className="btn-row">
-                                <button
-                                    className={`btn ${zoomMode === 'leftEyebrow' ? 'btn-primary' : ''}`}
-                                    onClick={() => {
-                                        if (zoomMode === 'leftEyebrow') {
-                                            setZoomMode(null);
-                                            setZoomScale(2.5);
-                                        } else {
-                                            setZoomMode('leftEyebrow');
-                                        }
-                                        setTimeout(drawOverlay, 10);
-                                    }}
-                                    disabled={!image || isAnimating || leftEyebrowPoints.length === 0}
-                                >
-                                    {zoomMode === 'leftEyebrow' ? 'Exit Zoom' : 'Zoom L-Brow'}
-                                </button>
-                                <button
-                                    className={`btn ${zoomMode === 'rightEyebrow' ? 'btn-primary' : ''}`}
-                                    onClick={() => {
-                                        if (zoomMode === 'rightEyebrow') {
-                                            setZoomMode(null);
-                                            setZoomScale(2.5);
-                                        } else {
-                                            setZoomMode('rightEyebrow');
-                                        }
-                                        setTimeout(drawOverlay, 10);
-                                    }}
-                                    disabled={!image || isAnimating || rightEyebrowPoints.length === 0}
-                                >
-                                    {zoomMode === 'rightEyebrow' ? 'Exit Zoom' : 'Zoom R-Brow'}
-                                </button>
-                            </div>
-                            {zoomMode && (
+                            {isZoomed && (
                                 <>
                                     <div className="slider-row" style={{marginTop: 10}}>
                                         <label>Zoom Level</label>
@@ -1919,13 +1888,8 @@
                                         />
                                         <span style={{fontSize: '0.7rem', color: '#888'}}>{zoomScale.toFixed(1)}x</span>
                                     </div>
-                                    <div className="btn-row" style={{marginTop: 10}}>
-                                        <button className="btn btn-primary" onClick={addPointInZoom}>
-                                            Add Anchor Point
-                                        </button>
-                                    </div>
                                     <p style={{fontSize: '0.7rem', color: '#888', marginTop: 5}}>
-                                        Adds a point on the polygon edge. Double-click points to remove them.
+                                        Drag to pan. Click selection to reposition (auto-zooms out).
                                     </p>
                                 </>
                             )}
