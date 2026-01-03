@@ -1914,7 +1914,9 @@
                         const bow = Math.cos(nx * Math.PI * 2.5) * params.current.cupidBow * (b.height * 0.05);
                         const bowFaded = bow * Math.max(0, 1 - Math.abs(nx * 1.5));
                         const y = baseSplitY - mainCurve - bowFaded;
-                        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                        // Transform point to canvas space when zoomed
+                        const transformed = transformPointToCanvas({ x, y });
+                        if (i === 0) ctx.moveTo(transformed.x, transformed.y); else ctx.lineTo(transformed.x, transformed.y);
                     }
                     ctx.stroke();
                     ctx.setLineDash([]);
@@ -1922,7 +1924,10 @@
                     // Lip width box
                     ctx.strokeStyle = '#ffae00';
                     ctx.lineWidth = 1;
-                    ctx.strokeRect(lx, baseSplitY - 10, lipW, 20);
+                    // Transform the rectangle corners when zoomed
+                    const topLeft = transformPointToCanvas({ x: lx, y: baseSplitY - 10 });
+                    const bottomRight = transformPointToCanvas({ x: lx + lipW, y: baseSplitY + 10 });
+                    ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
                 }
             };
 
