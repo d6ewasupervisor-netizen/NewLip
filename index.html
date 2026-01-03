@@ -511,10 +511,18 @@
                 }
 
                 if (draggedPointIndex !== null && draggedEye) {
-                    const currentPoints = draggedEye === 'mouth' ? polyPoints : (draggedEye === 'leftEye' ? leftEyePoints : rightEyePoints);
-                    const newPoints = [...currentPoints];
-                    newPoints[draggedPointIndex] = m;
-                    updatePolygon(draggedEye, newPoints);
+                    let currentPoints;
+                    if (draggedEye === 'mouth') currentPoints = polyPoints;
+                    else if (draggedEye === 'leftEye') currentPoints = leftEyePoints;
+                    else if (draggedEye === 'rightEye') currentPoints = rightEyePoints;
+                    else if (draggedEye === 'leftBrow') currentPoints = leftEyebrowPoints;
+                    else if (draggedEye === 'rightBrow') currentPoints = rightEyebrowPoints;
+
+                    if (currentPoints) {
+                        const newPoints = [...currentPoints];
+                        newPoints[draggedPointIndex] = m;
+                        updatePolygon(draggedEye, newPoints);
+                    }
                     return;
                 }
 
@@ -1821,40 +1829,80 @@
                             <div className="btn-row">
                                 <button
                                     className={`btn ${zoomMode === 'mouth' ? 'btn-primary' : ''}`}
-                                    onClick={() => { setZoomMode(zoomMode === 'mouth' ? null : 'mouth'); setTimeout(drawOverlay, 10); }}
+                                    onClick={() => {
+                                        if (zoomMode === 'mouth') {
+                                            setZoomMode(null);
+                                            setZoomScale(2.5);
+                                        } else {
+                                            setZoomMode('mouth');
+                                        }
+                                        setTimeout(drawOverlay, 10);
+                                    }}
                                     disabled={!image || isAnimating || polyPoints.length === 0}
                                 >
-                                    {zoomMode === 'mouth' ? 'Exit Mouth' : 'Zoom Mouth'}
+                                    {zoomMode === 'mouth' ? 'Exit Zoom' : 'Zoom Mouth'}
                                 </button>
                                 <button
                                     className={`btn ${zoomMode === 'leftEye' ? 'btn-primary' : ''}`}
-                                    onClick={() => { setZoomMode(zoomMode === 'leftEye' ? null : 'leftEye'); setTimeout(drawOverlay, 10); }}
+                                    onClick={() => {
+                                        if (zoomMode === 'leftEye') {
+                                            setZoomMode(null);
+                                            setZoomScale(2.5);
+                                        } else {
+                                            setZoomMode('leftEye');
+                                        }
+                                        setTimeout(drawOverlay, 10);
+                                    }}
                                     disabled={!image || isAnimating || leftEyePoints.length === 0}
                                 >
-                                    {zoomMode === 'leftEye' ? 'Exit L-Eye' : 'Zoom L-Eye'}
+                                    {zoomMode === 'leftEye' ? 'Exit Zoom' : 'Zoom L-Eye'}
                                 </button>
                                 <button
                                     className={`btn ${zoomMode === 'rightEye' ? 'btn-primary' : ''}`}
-                                    onClick={() => { setZoomMode(zoomMode === 'rightEye' ? null : 'rightEye'); setTimeout(drawOverlay, 10); }}
+                                    onClick={() => {
+                                        if (zoomMode === 'rightEye') {
+                                            setZoomMode(null);
+                                            setZoomScale(2.5);
+                                        } else {
+                                            setZoomMode('rightEye');
+                                        }
+                                        setTimeout(drawOverlay, 10);
+                                    }}
                                     disabled={!image || isAnimating || rightEyePoints.length === 0}
                                 >
-                                    {zoomMode === 'rightEye' ? 'Exit R-Eye' : 'Zoom R-Eye'}
+                                    {zoomMode === 'rightEye' ? 'Exit Zoom' : 'Zoom R-Eye'}
                                 </button>
                             </div>
                             <div className="btn-row">
                                 <button
                                     className={`btn ${zoomMode === 'leftEyebrow' ? 'btn-primary' : ''}`}
-                                    onClick={() => { setZoomMode(zoomMode === 'leftEyebrow' ? null : 'leftEyebrow'); setTimeout(drawOverlay, 10); }}
+                                    onClick={() => {
+                                        if (zoomMode === 'leftEyebrow') {
+                                            setZoomMode(null);
+                                            setZoomScale(2.5);
+                                        } else {
+                                            setZoomMode('leftEyebrow');
+                                        }
+                                        setTimeout(drawOverlay, 10);
+                                    }}
                                     disabled={!image || isAnimating || leftEyebrowPoints.length === 0}
                                 >
-                                    {zoomMode === 'leftEyebrow' ? 'Exit L-Brow' : 'Zoom L-Brow'}
+                                    {zoomMode === 'leftEyebrow' ? 'Exit Zoom' : 'Zoom L-Brow'}
                                 </button>
                                 <button
                                     className={`btn ${zoomMode === 'rightEyebrow' ? 'btn-primary' : ''}`}
-                                    onClick={() => { setZoomMode(zoomMode === 'rightEyebrow' ? null : 'rightEyebrow'); setTimeout(drawOverlay, 10); }}
+                                    onClick={() => {
+                                        if (zoomMode === 'rightEyebrow') {
+                                            setZoomMode(null);
+                                            setZoomScale(2.5);
+                                        } else {
+                                            setZoomMode('rightEyebrow');
+                                        }
+                                        setTimeout(drawOverlay, 10);
+                                    }}
                                     disabled={!image || isAnimating || rightEyebrowPoints.length === 0}
                                 >
-                                    {zoomMode === 'rightEyebrow' ? 'Exit R-Brow' : 'Zoom R-Brow'}
+                                    {zoomMode === 'rightEyebrow' ? 'Exit Zoom' : 'Zoom R-Brow'}
                                 </button>
                             </div>
                             {zoomMode && (
