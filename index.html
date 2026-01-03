@@ -89,8 +89,17 @@
             const [draggedEye, setDraggedEye] = React.useState(null); // 'left', 'right', 'leftBrow', 'rightBrow'
 
             // Zoom/Magnification for fine-tuning
-            const [zoomMode, setZoomMode] = React.useState(null); // 'mouth', 'leftEye', 'rightEye', or null
+            const [zoomMode, setZoomMode] = React.useState(null); // 'mouth', 'leftEye', 'rightEye', 'leftEyebrow', 'rightEyebrow', or null
             const [zoomScale, setZoomScale] = React.useState(2.5);
+
+            // Feature toggles
+            const [enableMouth, setEnableMouth] = React.useState(true);
+            const [enableEyes, setEnableEyes] = React.useState(true);
+            const [enableEyebrows, setEnableEyebrows] = React.useState(true);
+
+            // Undo/Redo system
+            const [history, setHistory] = React.useState([]);
+            const [historyIndex, setHistoryIndex] = React.useState(-1);
 
             // Interaction
             const [activeTab, setActiveTab] = React.useState('audio');
@@ -158,6 +167,76 @@
                 });
                 return { x: Math.floor(minX), y: Math.floor(minY), width: Math.ceil(maxX - minX), height: Math.ceil(maxY - minY) };
             };
+
+            // --- UNDO/REDO SYSTEM ---
+            const saveToHistory = () => {
+                const state = {
+                    polyPoints: JSON.parse(JSON.stringify(polyPoints)),
+                    leftEyePoints: JSON.parse(JSON.stringify(leftEyePoints)),
+                    rightEyePoints: JSON.parse(JSON.stringify(rightEyePoints)),
+                    leftEyebrowPoints: JSON.parse(JSON.stringify(leftEyebrowPoints)),
+                    rightEyebrowPoints: JSON.parse(JSON.stringify(rightEyebrowPoints))
+                };
+
+                // Truncate history if we're not at the end
+                const newHistory = history.slice(0, historyIndex + 1);
+                newHistory.push(state);
+
+                // Keep only last 15 states
+                if (newHistory.length > 15) {
+                    newHistory.shift();
+                }
+
+                setHistory(newHistory);
+                setHistoryIndex(newHistory.length - 1);
+
+                // Save to localStorage
+                try {
+                    localStorage.setItem('lipSyncHistory', JSON.stringify(newHistory));
+                } catch (e) {
+                    console.error('Failed to save history to localStorage:', e);
+                }
+            };
+
+            const undo = () => {
+                if (historyIndex > 0) {
+                    const prevIndex = historyIndex - 1;
+                    const state = history[prevIndex];
+                    setPolyPoints(state.polyPoints);
+                    setLeftEyePoints(state.leftEyePoints);
+                    setRightEyePoints(state.rightEyePoints);
+                    setLeftEyebrowPoints(state.leftEyebrowPoints);
+                    setRightEyebrowPoints(state.rightEyebrowPoints);
+                    setHistoryIndex(prevIndex);
+                }
+            };
+
+            const redo = () => {
+                if (historyIndex < history.length - 1) {
+                    const nextIndex = historyIndex + 1;
+                    const state = history[nextIndex];
+                    setPolyPoints(state.polyPoints);
+                    setLeftEyePoints(state.leftEyePoints);
+                    setRightEyePoints(state.rightEyePoints);
+                    setLeftEyebrowPoints(state.leftEyebrowPoints);
+                    setRightEyebrowPoints(state.rightEyebrowPoints);
+                    setHistoryIndex(nextIndex);
+                }
+            };
+
+            // Load history from localStorage on mount
+            React.useEffect(() => {
+                try {
+                    const savedHistory = localStorage.getItem('lipSyncHistory');
+                    if (savedHistory) {
+                        const parsed = JSON.parse(savedHistory);
+                        setHistory(parsed);
+                        setHistoryIndex(parsed.length - 1);
+                    }
+                } catch (e) {
+                    console.error('Failed to load history from localStorage:', e);
+                }
+            }, []);
 
             React.useEffect(() => {
                 params.current = { lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap };
@@ -467,11 +546,17 @@
                         const pts = polyFromRect(boxRect);
                         setPolyPoints(pts); // Default to mouth for manual box
                         setStatus("Manual mouth selection applied. Refine points or start animation.");
+                        saveToHistory();
                         drawOverlay();
                     }
                     setBoxRect(null);
                     setManualBoxMode(false);
                     return;
+                }
+
+                // Save to history if we were dragging
+                if (draggedPointIndex !== null || draggedEye !== null || isDraggingPoly) {
+                    saveToHistory();
                 }
 
                 setDraggedPointIndex(null);
@@ -491,6 +576,7 @@
                     if (clicked.points.length > 3) {
                         const filtered = clicked.points.filter((_, i) => i !== clicked.pointIndex);
                         updatePolygon(clicked.type, filtered);
+                        saveToHistory();
                     }
                     return;
                 }
@@ -504,6 +590,7 @@
                             const newPoints = [...points];
                             newPoints.splice(i + 1, 0, m);
                             updatePolygon(type, newPoints);
+                            saveToHistory();
                             return;
                         }
                     }
@@ -536,6 +623,57 @@
                 } else {
                     setEyePresets([...eyePresets, preset]);
                 }
+            };
+
+            // Add point on nearest edge in zoom mode
+            const addPointInZoom = () => {
+                if (!zoomMode) return;
+
+                // Get the polygon we're zooming
+                let points = [];
+                let type = '';
+                if (zoomMode === 'mouth') { points = polyPoints; type = 'mouth'; }
+                else if (zoomMode === 'leftEye') { points = leftEyePoints; type = 'leftEye'; }
+                else if (zoomMode === 'rightEye') { points = rightEyePoints; type = 'rightEye'; }
+                else if (zoomMode === 'leftEyebrow') { points = leftEyebrowPoints; type = 'leftBrow'; }
+                else if (zoomMode === 'rightEyebrow') { points = rightEyebrowPoints; type = 'rightBrow'; }
+
+                if (points.length < 2) return;
+
+                // Find the center of the polygon
+                const bounds = getBounds(points);
+                const centerPoint = {
+                    x: bounds.x + bounds.width / 2,
+                    y: bounds.y + bounds.height / 2
+                };
+
+                // Find the closest edge to the center
+                let closestDistance = Infinity;
+                let closestIndex = 0;
+
+                for (let i = 0; i < points.length; i++) {
+                    const p1 = points[i];
+                    const p2 = points[(i + 1) % points.length];
+                    const dist = distToSegment(centerPoint, p1, p2);
+                    if (dist < closestDistance) {
+                        closestDistance = dist;
+                        closestIndex = i;
+                    }
+                }
+
+                // Add a point at the midpoint of the closest edge
+                const p1 = points[closestIndex];
+                const p2 = points[(closestIndex + 1) % points.length];
+                const newPoint = {
+                    x: (p1.x + p2.x) / 2,
+                    y: (p1.y + p2.y) / 2
+                };
+
+                const newPoints = [...points];
+                newPoints.splice(closestIndex + 1, 0, newPoint);
+                updatePolygon(type, newPoints);
+                saveToHistory();
+                drawOverlay();
             };
 
             // --- 3D DENTAL ENGINE ---
@@ -1216,15 +1354,19 @@
                         console.log('Processing first frame - openPixels:', openPixels, 'bounds:', bounds);
                     }
 
-                    processFrame(openPixels, ctx, bounds, mouthBuffer, maskData);
+                    // Only process mouth if enabled
+                    if (enableMouth) {
+                        processFrame(openPixels, ctx, bounds, mouthBuffer, maskData);
+                    }
 
-                    // Eye animation - randomly select from chosen presets
-                    eyeStateTimer += 1 / 60;
-                    let leftEyeOpen = 1;
-                    let rightEyeOpen = 1;
+                    // Eye animation - only if enabled
+                    if (enableEyes) {
+                        eyeStateTimer += 1 / 60;
+                        let leftEyeOpen = 1;
+                        let rightEyeOpen = 1;
 
-                    // Check if it's time to change eye state
-                    if (eyeStateTimer >= eyeStateDuration) {
+                        // Check if it's time to change eye state
+                        if (eyeStateTimer >= eyeStateDuration) {
                         eyeStateTimer = 0;
                         // Randomly pick a preset from the selected list, or stay normal
                         if (eyePresets.length > 0 && Math.random() < 0.3) {
@@ -1236,6 +1378,11 @@
                             else if (currentEyeState === 'look_right') { currentPupilX = 0.7; currentPupilY = 0; }
                             else if (currentEyeState === 'look_up') { currentPupilX = 0; currentPupilY = -0.7; }
                             else if (currentEyeState === 'look_down') { currentPupilX = 0; currentPupilY = 0.7; }
+                            else if (currentEyeState === 'eye_roll') {
+                                // Eye roll will be animated in real-time below, just set initial position
+                                currentPupilX = 0;
+                                currentPupilY = -0.7; // Start looking up
+                            }
                             else { currentPupilX = 0; currentPupilY = 0; }
 
                             // Duration depends on action type
@@ -1243,6 +1390,7 @@
                             else if (currentEyeState === 'wink_left' || currentEyeState === 'wink_right') eyeStateDuration = 0.4; // Wink
                             else if (currentEyeState === 'excited') eyeStateDuration = 1.0 + Math.random() * 1.5; // Excited
                             else if (currentEyeState === 'glare') eyeStateDuration = 0.6 + Math.random() * 1.0; // Glare
+                            else if (currentEyeState === 'eye_roll') eyeStateDuration = 1.5; // Complete roll cycle
                             else eyeStateDuration = 0.8 + Math.random() * 1.5; // Look around
                         } else {
                             currentEyeState = 'normal';
@@ -1250,6 +1398,15 @@
                             currentPupilY = 0;
                             eyeStateDuration = 1.0 + Math.random() * 2.0; // Stay normal for a bit
                         }
+                    }
+
+                    // Animate eye_roll in real-time
+                    if (currentEyeState === 'eye_roll') {
+                        // Circular motion: progress through the roll
+                        const rollProgress = eyeStateTimer / eyeStateDuration;
+                        const angle = rollProgress * Math.PI * 2; // Full circle
+                        currentPupilX = Math.sin(angle) * 0.7;
+                        currentPupilY = -Math.cos(angle) * 0.7; // Start at top (negative Y)
                     }
 
                     // Set eye openness based on state (separate for left/right)
@@ -1273,8 +1430,9 @@
                         rightEyeOpen = 1;
                     }
 
-                    if (leftEyePoints.length > 2) processEyeFrame(leftEyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY);
-                    if (rightEyePoints.length > 2) processEyeFrame(rightEyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY);
+                        if (leftEyePoints.length > 2) processEyeFrame(leftEyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY);
+                        if (rightEyePoints.length > 2) processEyeFrame(rightEyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY);
+                    }
 
                     animationFrameRef.current = requestAnimationFrame(loop);
                 };
@@ -1407,6 +1565,7 @@
                         setLeftEyebrowPoints(leftEyebrow);
                         setRightEyebrowPoints(rightEyebrow);
 
+                        saveToHistory();
                         drawOverlay();
                         setStatus("Detected face, eyes, and eyebrows. Refine or animate!");
                     } else {
@@ -1446,6 +1605,8 @@
                     if (zoomMode === 'mouth') zoomPoints = polyPoints;
                     else if (zoomMode === 'leftEye') zoomPoints = leftEyePoints;
                     else if (zoomMode === 'rightEye') zoomPoints = rightEyePoints;
+                    else if (zoomMode === 'leftEyebrow') zoomPoints = leftEyebrowPoints;
+                    else if (zoomMode === 'rightEyebrow') zoomPoints = rightEyebrowPoints;
 
                     if (zoomPoints.length > 0) {
                         const bounds = getBounds(zoomPoints);
@@ -1515,6 +1676,12 @@
                         } else if (zoomMode === 'rightEye') {
                             drawZoomedPoints(rightEyePoints, '#00ff00');
                             drawZoomedPoints(rightEyebrowPoints, '#ffaa00');
+                        } else if (zoomMode === 'leftEyebrow') {
+                            drawZoomedPoints(leftEyebrowPoints, '#ffaa00');
+                            drawZoomedPoints(leftEyePoints, '#00ff00'); // Show eye too for context
+                        } else if (zoomMode === 'rightEyebrow') {
+                            drawZoomedPoints(rightEyebrowPoints, '#ffaa00');
+                            drawZoomedPoints(rightEyePoints, '#00ff00'); // Show eye too for context
                         }
 
                         ctx.fillStyle = '#00ff99';
@@ -1531,7 +1698,7 @@
                 canvasRef.current.zoomTransform = null;
 
                 // Mouth
-                if (polyPoints.length > 0) {
+                if (enableMouth && polyPoints.length > 0) {
                     ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2;
                     ctx.beginPath();
                     ctx.moveTo(polyPoints[0].x, polyPoints[0].y);
@@ -1555,8 +1722,10 @@
                         eyePoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill(); });
                     }
                 };
-                drawEyeOverlay(leftEyePoints);
-                drawEyeOverlay(rightEyePoints);
+                if (enableEyes) {
+                    drawEyeOverlay(leftEyePoints);
+                    drawEyeOverlay(rightEyePoints);
+                }
 
                 // Eyebrows overlay (yellow/orange to distinguish from eyes)
                 const drawEyebrowOverlay = (browPoints) => {
@@ -1572,8 +1741,10 @@
                         browPoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill(); });
                     }
                 };
-                drawEyebrowOverlay(leftEyebrowPoints);
-                drawEyebrowOverlay(rightEyebrowPoints);
+                if (enableEyebrows) {
+                    drawEyebrowOverlay(leftEyebrowPoints);
+                    drawEyebrowOverlay(rightEyebrowPoints);
+                }
 
                 // Guides for mouth
                 if (polyPoints.length > 0) {
@@ -1670,19 +1841,45 @@
                                     {zoomMode === 'rightEye' ? 'Exit R-Eye' : 'Zoom R-Eye'}
                                 </button>
                             </div>
+                            <div className="btn-row">
+                                <button
+                                    className={`btn ${zoomMode === 'leftEyebrow' ? 'btn-primary' : ''}`}
+                                    onClick={() => { setZoomMode(zoomMode === 'leftEyebrow' ? null : 'leftEyebrow'); setTimeout(drawOverlay, 10); }}
+                                    disabled={!image || isAnimating || leftEyebrowPoints.length === 0}
+                                >
+                                    {zoomMode === 'leftEyebrow' ? 'Exit L-Brow' : 'Zoom L-Brow'}
+                                </button>
+                                <button
+                                    className={`btn ${zoomMode === 'rightEyebrow' ? 'btn-primary' : ''}`}
+                                    onClick={() => { setZoomMode(zoomMode === 'rightEyebrow' ? null : 'rightEyebrow'); setTimeout(drawOverlay, 10); }}
+                                    disabled={!image || isAnimating || rightEyebrowPoints.length === 0}
+                                >
+                                    {zoomMode === 'rightEyebrow' ? 'Exit R-Brow' : 'Zoom R-Brow'}
+                                </button>
+                            </div>
                             {zoomMode && (
-                                <div className="slider-row" style={{marginTop: 10}}>
-                                    <label>Zoom Level</label>
-                                    <input
-                                        type="range"
-                                        min="1.5"
-                                        max="5"
-                                        step="0.5"
-                                        value={zoomScale}
-                                        onChange={e => { setZoomScale(Number(e.target.value)); setTimeout(drawOverlay, 10); }}
-                                    />
-                                    <span style={{fontSize: '0.7rem', color: '#888'}}>{zoomScale.toFixed(1)}x</span>
-                                </div>
+                                <>
+                                    <div className="slider-row" style={{marginTop: 10}}>
+                                        <label>Zoom Level</label>
+                                        <input
+                                            type="range"
+                                            min="1.5"
+                                            max="5"
+                                            step="0.5"
+                                            value={zoomScale}
+                                            onChange={e => { setZoomScale(Number(e.target.value)); setTimeout(drawOverlay, 10); }}
+                                        />
+                                        <span style={{fontSize: '0.7rem', color: '#888'}}>{zoomScale.toFixed(1)}x</span>
+                                    </div>
+                                    <div className="btn-row" style={{marginTop: 10}}>
+                                        <button className="btn btn-primary" onClick={addPointInZoom}>
+                                            Add Anchor Point
+                                        </button>
+                                    </div>
+                                    <p style={{fontSize: '0.7rem', color: '#888', marginTop: 5}}>
+                                        Adds a point on the polygon edge. Double-click points to remove them.
+                                    </p>
+                                </>
                             )}
 
                             <div className="hint">
@@ -1690,6 +1887,56 @@
                             </div>
                         </div>
 
+                        <div className="panel">
+                            <h3>Undo/Redo</h3>
+                            <div className="btn-row">
+                                <button className="btn" onClick={undo} disabled={historyIndex <= 0}>
+                                    Undo
+                                </button>
+                                <button className="btn" onClick={redo} disabled={historyIndex >= history.length - 1}>
+                                    Redo
+                                </button>
+                            </div>
+                            <p style={{fontSize: '0.7rem', color: '#888', marginTop: 5}}>
+                                {history.length > 0 ? `${historyIndex + 1} / ${history.length}` : 'No history'}
+                            </p>
+                        </div>
+
+                        <div className="panel">
+                            <h3>Feature Toggles</h3>
+                            <p style={{fontSize: '0.75rem', color: '#888', marginBottom: '10px'}}>
+                                Enable or disable animation features
+                            </p>
+                            <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                                <label style={{display: 'flex', alignItems: 'center', cursor: 'pointer'}}>
+                                    <input
+                                        type="checkbox"
+                                        checked={enableMouth}
+                                        onChange={e => setEnableMouth(e.target.checked)}
+                                        style={{marginRight: '8px'}}
+                                    />
+                                    Enable Mouth Animation
+                                </label>
+                                <label style={{display: 'flex', alignItems: 'center', cursor: 'pointer'}}>
+                                    <input
+                                        type="checkbox"
+                                        checked={enableEyes}
+                                        onChange={e => setEnableEyes(e.target.checked)}
+                                        style={{marginRight: '8px'}}
+                                    />
+                                    Enable Eye Animation
+                                </label>
+                                <label style={{display: 'flex', alignItems: 'center', cursor: 'pointer'}}>
+                                    <input
+                                        type="checkbox"
+                                        checked={enableEyebrows}
+                                        onChange={e => setEnableEyebrows(e.target.checked)}
+                                        style={{marginRight: '8px'}}
+                                    />
+                                    Enable Eyebrow Animation
+                                </label>
+                            </div>
+                        </div>
 
                         <div className="panel">
                             <h3>Audio Source</h3>
@@ -1910,6 +2157,14 @@
                                     onClick={() => toggleEyePreset('look_down')}
                                 >
                                     Look Down
+                                </button>
+                            </div>
+                            <div className="btn-row">
+                                <button
+                                    className={`btn ${eyePresets.includes('eye_roll') ? 'btn-primary' : ''}`}
+                                    onClick={() => toggleEyePreset('eye_roll')}
+                                >
+                                    Eye Roll
                                 </button>
                             </div>
                         </div>
