@@ -252,10 +252,16 @@
                 const rect = canvasRef.current.getBoundingClientRect();
                 const scaleX = canvasRef.current.width / rect.width;
                 const scaleY = canvasRef.current.height / rect.height;
+
+                // Handle touch events
+                if (e.touches && e.touches.length > 0) {
+                    return { x: (e.touches[0].clientX - rect.left) * scaleX, y: (e.touches[0].clientY - rect.top) * scaleY };
+                }
+
                 return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
             };
 
-            const isNearPoint = (p, target, radius=8) => Math.sqrt(Math.pow(p.x - target.x, 2) + Math.pow(p.y - target.y, 2)) < radius;
+            const isNearPoint = (p, target, radius=20) => Math.sqrt(Math.pow(p.x - target.x, 2) + Math.pow(p.y - target.y, 2)) < radius;
 
             const distToSegment = (p, a, b) => {
                 const l2 = Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2);
@@ -398,12 +404,12 @@
                     if (clicked.pointIndex !== -1) cursor = 'move';
                     else cursor = isDraggingPoly ? 'grabbing' : 'grab';
                 } else {
-                    // Check if near edge for adding points
+                    // Check if near edge for adding points (increased radius for touch)
                     for (const {poly} of [{poly: polyPoints}, {poly: leftEyePoints}, {poly: rightEyePoints}]) {
                         for (let i = 0; i < poly.length; i++) {
                             const p1 = poly[i];
                             const p2 = poly[(i + 1) % poly.length];
-                            if (distToSegment(m, p1, p2) < 5) cursor = 'copy';
+                            if (distToSegment(m, p1, p2) < 15) cursor = 'copy';
                         }
                     }
                 }
@@ -447,12 +453,12 @@
                     return;
                 }
 
-                // Check all polygons for adding points on edges
+                // Check all polygons for adding points on edges (increased radius for touch)
                 for (const {type, points} of [{type: 'mouth', points: polyPoints}, {type: 'leftEye', points: leftEyePoints}, {type: 'rightEye', points: rightEyePoints}]) {
                     for (let i = 0; i < points.length; i++) {
                         const p1 = points[i];
                         const p2 = points[(i + 1) % points.length];
-                        if (distToSegment(m, p1, p2) < 5) {
+                        if (distToSegment(m, p1, p2) < 15) {
                             const newPoints = [...points];
                             newPoints.splice(i + 1, 0, m);
                             updatePolygon(type, newPoints);
@@ -460,6 +466,22 @@
                         }
                     }
                 }
+            };
+
+            // Touch event handlers for mobile support
+            const handleTouchStart = (e) => {
+                e.preventDefault(); // Prevent scrolling while touching canvas
+                handleMouseDown(e);
+            };
+
+            const handleTouchMove = (e) => {
+                e.preventDefault();
+                handleMouseMove(e);
+            };
+
+            const handleTouchEnd = (e) => {
+                e.preventDefault();
+                handleMouseUp(e);
             };
 
             const toggleEyePreset = (preset) => {
@@ -891,8 +913,23 @@
             };
 
             const startAnimation = async () => {
-                if (polyPoints.length < 3) return;
+                if (polyPoints.length < 3) {
+                    setStatus("Please detect or draw mouth points first!");
+                    return;
+                }
+
+                setStatus("Starting animation...");
                 const bounds = getBounds(polyPoints);
+
+                // Generate mouth texture before starting
+                if (bounds.width > 0 && bounds.height > 0) {
+                    generateMouthTexture(bounds.width, bounds.height);
+                    console.log('Generated mouth texture:', bounds.width, 'x', bounds.height);
+                } else {
+                    setStatus("Invalid mouth bounds!");
+                    return;
+                }
+
                 const leftEyeBounds = getBounds(leftEyePoints);
                 const rightEyeBounds = getBounds(rightEyePoints);
                 const ctx = canvasRef.current.getContext('2d');
@@ -1037,13 +1074,21 @@
                 let currentPupilY = 0;
                 let eyeStateDuration = 0; // How long to hold current eye state
 
+                let frameCount = 0;
                 const loop = () => {
+                    frameCount++;
+                    if (frameCount === 1) {
+                        console.log('Animation loop started!');
+                        setStatus("Animating...");
+                    }
+
                     const elapsed = (Date.now() - startTime) / 1000;
 
                     let target = 0;
                     let plos = 0, cons = 0, vowel = 0;
 
                     if (activeTab === 'audio' && analyser) {
+                        if (frameCount === 1) console.log('Using audio analysis mode');
                         analyser.getByteTimeDomainData(timeArray);
                         let rms = 0;
                         for (let i = 0; i < timeArray.length; i++) {
@@ -1060,10 +1105,18 @@
                         target = (rms * 1.3 + vowel * 0.9 + cons * 0.8 + plos * 0.6) / (1.3 + 0.9 + 0.8 + 0.6);
                         target = Math.min(1, Math.max(0, target));
                     } else if (activeTab === 'tts') {
+                        if (frameCount === 1) console.log('Using TTS mode');
                         const t = elapsed;
                         target = Math.abs(Math.sin(t * 8) * 0.5 + Math.sin(t * 19) * 0.4);
 
                         // pseudo consonant/plosive from transients
+                        plos = Math.min(1, Math.max(0, (target - prevTarget) * 3));
+                        cons = Math.min(1, Math.max(0, Math.abs(Math.cos(t * 12)) * 0.35));
+                    } else if (activeTab === 'audio' && !analyser) {
+                        // Audio mode but no analyser (audio not playing yet or failed to load)
+                        if (frameCount === 1) console.log('Audio mode but no analyser - using fallback animation');
+                        const t = elapsed;
+                        target = Math.abs(Math.sin(t * 8) * 0.5 + Math.sin(t * 19) * 0.4);
                         plos = Math.min(1, Math.max(0, (target - prevTarget) * 3));
                         cons = Math.min(1, Math.max(0, Math.abs(Math.cos(t * 12)) * 0.35));
                     }
@@ -1107,6 +1160,10 @@
 
                     const maxOpen = bounds.height * 0.45;
                     const openPixels = Math.floor(currentOpenness * maxOpen);
+
+                    if (frameCount === 1) {
+                        console.log('Processing first frame - openPixels:', openPixels, 'bounds:', bounds);
+                    }
 
                     processFrame(openPixels, ctx, bounds, mouthBuffer, maskData);
 
@@ -1339,9 +1396,18 @@
 
             return (
                 <div className="layout">
-                    <div className="stage" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onDoubleClick={handleDoubleClick}>
+                    <div
+                        className="stage"
+                        onMouseDown={handleMouseDown}
+                        onMouseMove={handleMouseMove}
+                        onMouseUp={handleMouseUp}
+                        onDoubleClick={handleDoubleClick}
+                        onTouchStart={handleTouchStart}
+                        onTouchMove={handleTouchMove}
+                        onTouchEnd={handleTouchEnd}
+                    >
                         {!image && <div className="upload-zone" onClick={()=>document.getElementById('imgIn').click()}><h2>Upload Photo</h2><p>High Resolution Recommended</p><input id="imgIn" type="file" onChange={handleImageUpload} style={{display:'none'}} accept="image/*" /></div>}
-                        <canvas ref={canvasRef} style={{opacity: image?1:0}} />
+                        <canvas ref={canvasRef} style={{opacity: image?1:0, touchAction: 'none'}} />
                         {isDetecting && <div className="overlay-msg"><div className="spinner"></div><span>Scanning Face...</span></div>}
                     </div>
 
