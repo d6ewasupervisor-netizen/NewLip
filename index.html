@@ -1495,7 +1495,7 @@
                                 const pt = transformToZoom(points[i]);
                                 ctx.lineTo(pt.x, pt.y);
                             }
-                            if (color !== '#ffaa00') ctx.closePath();
+                            ctx.closePath();
                             ctx.stroke();
 
                             ctx.fillStyle = '#fff';
@@ -1565,7 +1565,8 @@
                         ctx.beginPath();
                         ctx.moveTo(browPoints[0].x, browPoints[0].y);
                         for (let i = 1; i < browPoints.length; i++) ctx.lineTo(browPoints[i].x, browPoints[i].y);
-                        ctx.stroke(); // Don't close path for eyebrows
+                        ctx.closePath();
+                        ctx.stroke();
 
                         ctx.fillStyle = '#ffaa00';
                         browPoints.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill(); });
