@@ -206,6 +206,7 @@
             const saveToHistory = () => {
                 const state = {
                     polyPoints: JSON.parse(JSON.stringify(polyPoints)),
+                    lipLinePoints: JSON.parse(JSON.stringify(lipLinePoints)),
                     leftEyePoints: JSON.parse(JSON.stringify(leftEyePoints)),
                     rightEyePoints: JSON.parse(JSON.stringify(rightEyePoints))
                 };
@@ -235,6 +236,7 @@
                     const prevIndex = historyIndex - 1;
                     const state = history[prevIndex];
                     setPolyPoints(state.polyPoints);
+                    setLipLinePoints(state.lipLinePoints || []);
                     setLeftEyePoints(state.leftEyePoints);
                     setRightEyePoints(state.rightEyePoints);
                     setHistoryIndex(prevIndex);
@@ -246,6 +248,7 @@
                     const nextIndex = historyIndex + 1;
                     const state = history[nextIndex];
                     setPolyPoints(state.polyPoints);
+                    setLipLinePoints(state.lipLinePoints || []);
                     setLeftEyePoints(state.leftEyePoints);
                     setRightEyePoints(state.rightEyePoints);
                     setHistoryIndex(nextIndex);
@@ -440,6 +443,13 @@
                 if (polyPoints.length > 2 && !isAnimating) {
                     const bounds = getBounds(polyPoints);
                     generateMouthTexture(bounds.width, bounds.height);
+
+                    // Regenerate lip line when relevant parameters change
+                    const newLipLine = generateLipLine(bounds);
+                    if (newLipLine.length > 0) {
+                        setLipLinePoints(newLipLine);
+                    }
+
                     drawOverlay();
                 }
             }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints, isZoomed, zoomScale, panOffset]);
@@ -483,6 +493,7 @@
                     setSensitivity(data.sensitivity || 1.5);
                     setSmoothing(data.smoothing || 0.2);
                     setPolyPoints(data.polyPoints || []);
+                    setLipLinePoints(data.lipLinePoints || []);
                     setLeftEyePoints(data.leftEyePoints || []);
                     setRightEyePoints(data.rightEyePoints || []);
                     setEyePresets(data.eyePresets || ['blink', 'wink_left', 'look_left', 'look_right']);
@@ -502,7 +513,7 @@
                 const data = {
                     lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten,
                     splitColor, splitTexture, lipRoll, syllableSnap, sensitivity, smoothing,
-                    polyPoints, leftEyePoints, rightEyePoints,
+                    polyPoints, lipLinePoints, leftEyePoints, rightEyePoints,
                     eyePresets, voiceGender, voiceRate, voicePitch, voiceVolume, voiceTimbre, voiceAccent, savedVoiceProfiles, text
                 };
                 localStorage.setItem(draftKey, JSON.stringify(data));
@@ -677,13 +688,46 @@
                 return inside;
             };
 
+            const generateLipLine = (mouthBounds) => {
+                if (!mouthBounds || !polyPoints.length) return [];
+
+                const b = mouthBounds;
+                const lipW = b.width * params.current.lipWidth;
+                const lx = b.x + (b.width - lipW) / 2;
+                const cx = b.x + b.width / 2;
+                const baseSplitY = b.y + (b.height * params.current.lipSplit);
+
+                // Generate 15 points along the lip line following the contour
+                const points = [];
+                const numPoints = 15;
+                for (let i = 0; i < numPoints; i++) {
+                    const t = i / (numPoints - 1); // 0 to 1
+                    const x = lx + t * lipW;
+                    const nx = (x - cx) / (lipW / 2);
+
+                    // Same curve calculation as the old guide
+                    const mainCurve = (nx * nx) * params.current.lipCurve * (b.height * 0.1);
+                    const bow = Math.cos(nx * Math.PI * 2.5) * params.current.cupidBow * (b.height * 0.05);
+                    const bowFaded = bow * Math.max(0, 1 - Math.abs(nx * 1.5));
+                    const y = baseSplitY - mainCurve - bowFaded;
+
+                    points.push({ x, y });
+                }
+
+                return points;
+            };
+
             const findClickedPolygon = (point) => {
                 // Check which polygon (if any) was clicked
-                // Returns {type: 'mouth'|'leftEye'|'rightEye', points: array, pointIndex: number}
+                // Returns {type: 'mouth'|'leftEye'|'rightEye'|'lipLine', points: array, pointIndex: number}
 
                 // Check mouth points
                 const mouthIdx = polyPoints.findIndex(p => isNearPoint(p, point));
                 if (mouthIdx !== -1) return { type: 'mouth', points: polyPoints, pointIndex: mouthIdx };
+
+                // Check lip line points
+                const lipLineIdx = lipLinePoints.findIndex(p => isNearPoint(p, point));
+                if (lipLineIdx !== -1) return { type: 'lipLine', points: lipLinePoints, pointIndex: lipLineIdx };
 
                 // Check left eye points (includes eyebrows)
                 const leftEyeIdx = leftEyePoints.findIndex(p => isNearPoint(p, point));
@@ -703,6 +747,7 @@
 
             const updatePolygon = (type, newPoints) => {
                 if (type === 'mouth') setPolyPoints(newPoints);
+                else if (type === 'lipLine') setLipLinePoints(newPoints);
                 else if (type === 'leftEye') setLeftEyePoints(newPoints);
                 else if (type === 'rightEye') setRightEyePoints(newPoints);
             };
@@ -907,7 +952,7 @@
                     else cursor = isDraggingPoly ? 'grabbing' : 'grab';
                 } else {
                     // Check if near edge for adding points (increased radius for touch)
-                    for (const {poly} of [{poly: polyPoints}, {poly: leftEyePoints}, {poly: rightEyePoints}]) {
+                    for (const {poly} of [{poly: polyPoints}, {poly: lipLinePoints}, {poly: leftEyePoints}, {poly: rightEyePoints}]) {
                         for (let i = 0; i < poly.length; i++) {
                             const p1 = poly[i];
                             const p2 = poly[(i + 1) % poly.length];
@@ -958,7 +1003,7 @@
                 }
 
                 // Check all polygons for adding points on edges (increased radius for touch)
-                for (const {type, points} of [{type: 'mouth', points: polyPoints}, {type: 'leftEye', points: leftEyePoints}, {type: 'rightEye', points: rightEyePoints}]) {
+                for (const {type, points} of [{type: 'mouth', points: polyPoints}, {type: 'lipLine', points: lipLinePoints}, {type: 'leftEye', points: leftEyePoints}, {type: 'rightEye', points: rightEyePoints}]) {
                     for (let i = 0; i < points.length; i++) {
                         const p1 = points[i];
                         const p2 = points[(i + 1) % points.length];
@@ -1943,6 +1988,10 @@
                         setLeftEyePoints([...leftEyebrow, ...leftEye]);
                         setRightEyePoints([...rightEyebrow, ...rightEye]);
 
+                        // Generate initial lip line
+                        const mouthBounds = getBounds(expanded);
+                        setLipLinePoints(generateLipLine(mouthBounds));
+
                         saveToHistory();
                         drawOverlay();
                         setStatus("Detected face and eyes. Refine or animate!");
@@ -2111,35 +2160,35 @@
                     drawEyeOverlay(rightEyePoints);
                 }
 
-                // Guides for mouth
+                // Editable lip line (follows the split between upper and lower lips)
+                if (lipLinePoints.length > 0) {
+                    ctx.strokeStyle = '#00ff99';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    for (let i = 0; i < lipLinePoints.length; i++) {
+                        const pt = transformPointToCanvas(lipLinePoints[i]);
+                        if (i === 0) ctx.moveTo(pt.x, pt.y);
+                        else ctx.lineTo(pt.x, pt.y);
+                    }
+                    ctx.stroke();
+
+                    // Draw anchor points
+                    ctx.fillStyle = '#00ff99';
+                    lipLinePoints.forEach(p => {
+                        const pt = transformPointToCanvas(p);
+                        ctx.beginPath();
+                        ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+                }
+
+                // Lip width box (visual guide)
                 if (polyPoints.length > 0) {
                     const b = getBounds(polyPoints);
                     const lipW = b.width * params.current.lipWidth;
                     const lx = b.x + (b.width - lipW) / 2;
-                    const cx = b.x + b.width / 2;
                     const baseSplitY = b.y + (b.height * params.current.lipSplit);
 
-                    // Curved split guide (shows Cupid's Bow + Smile Curve impact)
-                    ctx.strokeStyle = '#00ff99';
-                    ctx.setLineDash([5, 5]);
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    const N = 80;
-                    for (let i = 0; i <= N; i++) {
-                        const x = b.x + (i / N) * b.width;
-                        const nx = (x - cx) / (lipW / 2);
-                        const mainCurve = (nx * nx) * params.current.lipCurve * (b.height * 0.1);
-                        const bow = Math.cos(nx * Math.PI * 2.5) * params.current.cupidBow * (b.height * 0.05);
-                        const bowFaded = bow * Math.max(0, 1 - Math.abs(nx * 1.5));
-                        const y = baseSplitY - mainCurve - bowFaded;
-                        // Transform point to canvas space when zoomed
-                        const transformed = transformPointToCanvas({ x, y });
-                        if (i === 0) ctx.moveTo(transformed.x, transformed.y); else ctx.lineTo(transformed.x, transformed.y);
-                    }
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-
-                    // Lip width box
                     ctx.strokeStyle = '#ffae00';
                     ctx.lineWidth = 1;
                     // Transform the rectangle corners when zoomed
@@ -2149,7 +2198,7 @@
                 }
             };
 
-            const resetAll = () => { stopEverything(); setImage(null); setRecordedVideo(null); setPolyPoints([]); setLeftEyePoints([]); setRightEyePoints([]); };
+            const resetAll = () => { stopEverything(); setImage(null); setRecordedVideo(null); setPolyPoints([]); setLipLinePoints([]); setLeftEyePoints([]); setRightEyePoints([]); };
 
             return (
                 <div className="layout">
