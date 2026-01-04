@@ -86,6 +86,9 @@
             const [eyePresets, setEyePresets] = React.useState(['blink', 'wink_left', 'look_left', 'look_right']); // Selected eye presets to apply randomly
             const [draggedEye, setDraggedEye] = React.useState(null); // 'left', 'right'
 
+            // Lip line (editable line following the split between upper and lower lips)
+            const [lipLinePoints, setLipLinePoints] = React.useState([]);
+
             // Zoom/Magnification for fine-tuning
             const [isZoomed, setIsZoomed] = React.useState(false);
             const [zoomScale, setZoomScale] = React.useState(1.0); // Start at 1.0 (no zoom)
