@@ -8,6 +8,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
     <style>
         :root { --accent: #ff00ff; --bg: #080808; --panel: #141414; --text: #ccc; }
         body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; height: 100vh; overflow: hidden; }
@@ -151,15 +152,41 @@
             const [sensitivity, setSensitivity] = React.useState(1.5);
             const [smoothing, setSmoothing] = React.useState(0.2);
 
+            // Background Removal
+            const [bgRemovalEnabled, setBgRemovalEnabled] = React.useState(false);
+            const [bgRemovalThreshold, setBgRemovalThreshold] = React.useState(0.5);
+            const [bgRemovalEdge, setBgRemovalEdge] = React.useState(0.1);
+            const [isRemovingBg, setIsRemovingBg] = React.useState(false);
+
+            // Background/Video
+            const [backgroundType, setBackgroundType] = React.useState('none'); // 'none', 'color', 'image', 'video'
+            const [backgroundColor, setBackgroundColor] = React.useState('#000000');
+            const [backgroundImage, setBackgroundImage] = React.useState(null);
+            const [backgroundVideo, setBackgroundVideo] = React.useState(null);
+
+            // Character positioning on background
+            const [characterPosition, setCharacterPosition] = React.useState({ x: 0.5, y: 0.5, scale: 1.0 });
+            const [isDraggingCharacter, setIsDraggingCharacter] = React.useState(false);
+
+            // Audio source selection
+            const [audioSource, setAudioSource] = React.useState('file'); // 'none', 'file', 'record', 'tts', 'video'
+
+            // Export options
+            const [exportWithAudio, setExportWithAudio] = React.useState(true);
+            const [exportWithBackground, setExportWithBackground] = React.useState(true);
+
             const canvasRef = React.useRef(null);
             const imageRef = React.useRef(null);
             const audioRef = React.useRef(null);
             const animationFrameRef = React.useRef(null);
             const originalImageDataRef = React.useRef(null);
-            const mouthTextureRef = React.useRef(null); 
+            const characterMaskRef = React.useRef(null); // Stores the segmented character with transparency
+            const mouthTextureRef = React.useRef(null);
             const audioContextRef = React.useRef(null);
             const mediaRecorderRef = React.useRef(null);
             const chunksRef = React.useRef([]);
+            const backgroundVideoRef = React.useRef(null);
+            const segmenterRef = React.useRef(null);
 
             const params = React.useRef({});
 
@@ -229,6 +256,175 @@
                     setRightEyebrowPoints(state.rightEyebrowPoints);
                     setHistoryIndex(nextIndex);
                 }
+            };
+
+            // --- BACKGROUND REMOVAL ---
+            const initSegmenter = async () => {
+                if (segmenterRef.current) return segmenterRef.current;
+
+                try {
+                    const segmenter = new SelfieSegmentation({
+                        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`
+                    });
+                    segmenter.setOptions({ modelSelection: 1, selfieMode: false });
+                    await segmenter.initialize();
+                    segmenterRef.current = segmenter;
+                    return segmenter;
+                } catch (e) {
+                    console.error('Failed to initialize segmenter:', e);
+                    return null;
+                }
+            };
+
+            const removeBackground = async () => {
+                if (!image || !canvasRef.current) return;
+
+                setIsRemovingBg(true);
+                setStatus('Removing background...');
+
+                try {
+                    const segmenter = await initSegmenter();
+                    if (!segmenter) {
+                        setStatus('Background removal not available');
+                        setIsRemovingBg(false);
+                        return;
+                    }
+
+                    // Create a temporary canvas with the original image
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = canvasRef.current.width;
+                    tempCanvas.height = canvasRef.current.height;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    if (originalImageDataRef.current) {
+                        tempCtx.putImageData(originalImageDataRef.current, 0, 0);
+                    }
+
+                    // Run segmentation
+                    const results = await new Promise((resolve) => {
+                        segmenter.onResults(resolve);
+                        segmenter.send({ image: tempCanvas });
+                    });
+
+                    if (results.segmentationMask) {
+                        // Create character mask with transparency
+                        const maskCanvas = document.createElement('canvas');
+                        maskCanvas.width = tempCanvas.width;
+                        maskCanvas.height = tempCanvas.height;
+                        const maskCtx = maskCanvas.getContext('2d');
+
+                        // Draw the original image
+                        maskCtx.drawImage(tempCanvas, 0, 0);
+
+                        // Get the image data
+                        const imageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+                        const maskData = results.segmentationMask;
+
+                        // Create a temporary canvas to read the mask
+                        const maskReadCanvas = document.createElement('canvas');
+                        maskReadCanvas.width = maskCanvas.width;
+                        maskReadCanvas.height = maskCanvas.height;
+                        const maskReadCtx = maskReadCanvas.getContext('2d');
+                        maskReadCtx.drawImage(maskData, 0, 0, maskCanvas.width, maskCanvas.height);
+                        const maskPixels = maskReadCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
+
+                        // Apply mask with threshold and edge softening
+                        for (let i = 0; i < imageData.data.length; i += 4) {
+                            const maskValue = maskPixels[i] / 255; // 0-1
+
+                            // Apply threshold
+                            let alpha;
+                            if (maskValue > bgRemovalThreshold + bgRemovalEdge) {
+                                alpha = 255;
+                            } else if (maskValue < bgRemovalThreshold - bgRemovalEdge) {
+                                alpha = 0;
+                            } else {
+                                // Smooth edge transition
+                                alpha = Math.round(((maskValue - (bgRemovalThreshold - bgRemovalEdge)) / (bgRemovalEdge * 2)) * 255);
+                            }
+
+                            imageData.data[i + 3] = alpha;
+                        }
+
+                        maskCtx.putImageData(imageData, 0, 0);
+                        characterMaskRef.current = maskCanvas;
+                        setBgRemovalEnabled(true);
+                        setStatus('Background removed. Adjust threshold/edge if needed.');
+                        drawOverlay();
+                    }
+                } catch (e) {
+                    console.error('Background removal failed:', e);
+                    setStatus('Background removal failed: ' + e.message);
+                }
+
+                setIsRemovingBg(false);
+            };
+
+            const resetBackgroundRemoval = () => {
+                characterMaskRef.current = null;
+                setBgRemovalEnabled(false);
+                drawOverlay();
+            };
+
+            // --- BACKGROUND IMAGE/VIDEO LOADING ---
+            const handleBackgroundImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        setBackgroundImage(img);
+                        setBackgroundType('image');
+                        setStatus('Background image loaded');
+                        drawOverlay();
+                    };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleBackgroundVideoUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const videoUrl = URL.createObjectURL(file);
+                const video = document.createElement('video');
+                video.src = videoUrl;
+                video.muted = true;
+                video.loop = true;
+                video.preload = 'auto';
+
+                video.onloadedmetadata = () => {
+                    setBackgroundVideo(video);
+                    backgroundVideoRef.current = video;
+                    setBackgroundType('video');
+                    setStatus('Background video loaded');
+
+                    // Also extract audio from video if audio source is 'video'
+                    if (audioSource === 'video') {
+                        const audioVideo = document.createElement('video');
+                        audioVideo.src = videoUrl;
+                        audioVideo.preload = 'auto';
+                        setAudioUrl(videoUrl);
+                    }
+
+                    video.play().catch(() => {});
+                    drawOverlay();
+                };
+                video.load();
+            };
+
+            const clearBackground = () => {
+                if (backgroundVideoRef.current) {
+                    backgroundVideoRef.current.pause();
+                    backgroundVideoRef.current.src = '';
+                }
+                setBackgroundImage(null);
+                setBackgroundVideo(null);
+                setBackgroundType('none');
+                backgroundVideoRef.current = null;
+                drawOverlay();
             };
 
             // Load history from localStorage on mount
@@ -1355,7 +1551,13 @@
                 const stream = canvasRef.current.captureStream(60);
                 chunksRef.current = []; let analyser;
 
-                if (activeTab === 'audio' && audioUrl) {
+                // Determine which audio source to use
+                const useAudio = exportWithAudio && audioSource !== 'none';
+                const useFileAudio = (audioSource === 'file' || audioSource === 'record') && audioUrl;
+                const useVideoAudio = audioSource === 'video' && backgroundType === 'video' && backgroundVideoRef.current;
+                const useTTS = audioSource === 'tts';
+
+                if (useFileAudio) {
                     const audio = new Audio(audioUrl);
                     audio.crossOrigin = "anonymous";
                     audioRef.current = audio;
@@ -1364,9 +1566,27 @@
                     const src = audioCtx.createMediaElementSource(audio);
                     const dest = audioCtx.createMediaStreamDestination();
                     src.connect(analyser); src.connect(audioCtx.destination); src.connect(dest);
-                    dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+                    if (exportWithAudio) {
+                        dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+                    }
                     audio.onended = stopEverything;
                     try { await audio.play(); } catch(e) { setStatus("Autoplay blocked. Click Stop."); console.warn(e); }
+                } else if (useVideoAudio) {
+                    // Use background video as audio source
+                    const video = backgroundVideoRef.current;
+                    video.currentTime = 0;
+                    video.muted = false;
+                    audioRef.current = video;
+                    analyser = audioCtx.createAnalyser();
+                    analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.5;
+                    const src = audioCtx.createMediaElementSource(video);
+                    const dest = audioCtx.createMediaStreamDestination();
+                    src.connect(analyser); src.connect(audioCtx.destination); src.connect(dest);
+                    if (exportWithAudio) {
+                        dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+                    }
+                    video.onended = stopEverything;
+                    try { await video.play(); } catch(e) { setStatus("Autoplay blocked. Click Stop."); console.warn(e); }
                 }
 
                 try {
@@ -1425,7 +1645,7 @@
                     let target = 0;
                     let plos = 0, cons = 0, vowel = 0;
 
-                    if (activeTab === 'audio' && analyser) {
+                    if (analyser) {
                         if (frameCount === 1) console.log('Using audio analysis mode');
                         analyser.getByteTimeDomainData(timeArray);
                         let rms = 0;
@@ -1442,7 +1662,7 @@
 
                         target = (rms * 1.3 + vowel * 0.9 + cons * 0.8 + plos * 0.6) / (1.3 + 0.9 + 0.8 + 0.6);
                         target = Math.min(1, Math.max(0, target));
-                    } else if (activeTab === 'tts') {
+                    } else if (useTTS) {
                         if (frameCount === 1) console.log('Using TTS mode');
                         const t = elapsed;
                         target = Math.abs(Math.sin(t * 8) * 0.5 + Math.sin(t * 19) * 0.4);
@@ -1450,9 +1670,9 @@
                         // pseudo consonant/plosive from transients
                         plos = Math.min(1, Math.max(0, (target - prevTarget) * 3));
                         cons = Math.min(1, Math.max(0, Math.abs(Math.cos(t * 12)) * 0.35));
-                    } else if (activeTab === 'audio' && !analyser) {
-                        // Audio mode but no analyser (audio not playing yet or failed to load)
-                        if (frameCount === 1) console.log('Audio mode but no analyser - using fallback animation');
+                    } else {
+                        // No audio mode or audio not playing - use fallback animation
+                        if (frameCount === 1) console.log('Using fallback animation (no audio)');
                         const t = elapsed;
                         target = Math.abs(Math.sin(t * 8) * 0.5 + Math.sin(t * 19) * 0.4);
                         plos = Math.min(1, Math.max(0, (target - prevTarget) * 3));
@@ -1587,7 +1807,7 @@
                 };
                 loop();
 
-                if (activeTab === 'tts') {
+                if (useTTS) {
                     const u = new SpeechSynthesisUtterance(text);
 
                     // Intelligent voice selection based on profile parameters
@@ -1760,6 +1980,8 @@
 
             const drawOverlay = () => {
                 const ctx = canvasRef.current.getContext('2d');
+                const cw = canvasRef.current.width;
+                const ch = canvasRef.current.height;
 
                 // Helper function to transform points from image space to canvas space when zoomed
                 const transformPointToCanvas = (p) => {
@@ -1776,34 +1998,83 @@
                     return { x: canvasX, y: canvasY };
                 };
 
-                // Create a temporary canvas with the original image
+                // Create a temporary canvas with the character image
                 const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = canvasRef.current.width;
-                tempCanvas.height = canvasRef.current.height;
+                tempCanvas.width = cw;
+                tempCanvas.height = ch;
                 const tempCtx = tempCanvas.getContext('2d');
-                if (originalImageDataRef.current) {
+
+                // Use either the background-removed character or the original image
+                if (bgRemovalEnabled && characterMaskRef.current) {
+                    tempCtx.drawImage(characterMaskRef.current, 0, 0);
+                } else if (originalImageDataRef.current) {
                     tempCtx.putImageData(originalImageDataRef.current, 0, 0);
                 }
 
-                // Clear the main canvas
+                // Clear the main canvas and draw background
                 ctx.fillStyle = '#000';
-                ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                ctx.fillRect(0, 0, cw, ch);
 
-                // If zoomed, draw the zoomed portion
-                if (isZoomed && zoomScale > 1.0) {
-                    const imageWidth = canvasRef.current.width;
-                    const imageHeight = canvasRef.current.height;
-                    const viewportWidth = imageWidth / zoomScale;
-                    const viewportHeight = imageHeight / zoomScale;
+                // Draw background based on type
+                if (backgroundType === 'color') {
+                    ctx.fillStyle = backgroundColor;
+                    ctx.fillRect(0, 0, cw, ch);
+                } else if (backgroundType === 'image' && backgroundImage) {
+                    // Scale and center the background image
+                    const bgAspect = backgroundImage.width / backgroundImage.height;
+                    const canvasAspect = cw / ch;
+                    let drawW, drawH, drawX, drawY;
 
-                    // Draw the zoomed portion of the image
+                    if (bgAspect > canvasAspect) {
+                        drawH = ch;
+                        drawW = ch * bgAspect;
+                        drawX = (cw - drawW) / 2;
+                        drawY = 0;
+                    } else {
+                        drawW = cw;
+                        drawH = cw / bgAspect;
+                        drawX = 0;
+                        drawY = (ch - drawH) / 2;
+                    }
+                    ctx.drawImage(backgroundImage, drawX, drawY, drawW, drawH);
+                } else if (backgroundType === 'video' && backgroundVideoRef.current) {
+                    // Draw current video frame as background
+                    const video = backgroundVideoRef.current;
+                    const bgAspect = video.videoWidth / video.videoHeight;
+                    const canvasAspect = cw / ch;
+                    let drawW, drawH, drawX, drawY;
+
+                    if (bgAspect > canvasAspect) {
+                        drawH = ch;
+                        drawW = ch * bgAspect;
+                        drawX = (cw - drawW) / 2;
+                        drawY = 0;
+                    } else {
+                        drawW = cw;
+                        drawH = cw / bgAspect;
+                        drawX = 0;
+                        drawY = (ch - drawH) / 2;
+                    }
+                    ctx.drawImage(video, drawX, drawY, drawW, drawH);
+                }
+
+                // Draw the character on top of the background
+                if (bgRemovalEnabled && characterMaskRef.current) {
+                    // Position the character based on characterPosition
+                    const charW = tempCanvas.width * characterPosition.scale;
+                    const charH = tempCanvas.height * characterPosition.scale;
+                    const charX = (cw - charW) * characterPosition.x;
+                    const charY = (ch - charH) * characterPosition.y;
+                    ctx.drawImage(tempCanvas, charX, charY, charW, charH);
+                } else if (isZoomed && zoomScale > 1.0) {
+                    // Zoomed view
+                    const viewportWidth = cw / zoomScale;
+                    const viewportHeight = ch / zoomScale;
                     ctx.drawImage(
                         tempCanvas,
                         panOffset.x, panOffset.y, viewportWidth, viewportHeight,
-                        0, 0, imageWidth, imageHeight
+                        0, 0, cw, ch
                     );
-
-                    // Display zoom indicator
                     ctx.fillStyle = '#00ff99';
                     ctx.font = '14px sans-serif';
                     ctx.fillText(`ZOOM: ${zoomScale.toFixed(1)}x - Drag to pan, click selection to reposition`, 20, 30);
@@ -2102,6 +2373,142 @@
                         </div>
 
                         <div className="panel">
+                            <h3>Background Removal</h3>
+                            <div className="btn-row">
+                                <button
+                                    className="btn"
+                                    onClick={removeBackground}
+                                    disabled={!image || isAnimating || isRemovingBg}
+                                >
+                                    {isRemovingBg ? 'Processing...' : 'Remove Background'}
+                                </button>
+                                <button
+                                    className="btn btn-danger"
+                                    onClick={resetBackgroundRemoval}
+                                    disabled={!bgRemovalEnabled}
+                                >
+                                    Reset
+                                </button>
+                            </div>
+                            {bgRemovalEnabled && (
+                                <>
+                                    <div className="slider-row" style={{marginTop: 10}}>
+                                        <label>Threshold</label>
+                                        <input
+                                            type="range"
+                                            min="0.1"
+                                            max="0.9"
+                                            step="0.05"
+                                            value={bgRemovalThreshold}
+                                            onChange={e => { setBgRemovalThreshold(Number(e.target.value)); removeBackground(); }}
+                                        />
+                                        <span style={{fontSize: '0.7rem', color: '#888'}}>{bgRemovalThreshold.toFixed(2)}</span>
+                                    </div>
+                                    <div className="slider-row">
+                                        <label>Edge Softness</label>
+                                        <input
+                                            type="range"
+                                            min="0.01"
+                                            max="0.3"
+                                            step="0.01"
+                                            value={bgRemovalEdge}
+                                            onChange={e => { setBgRemovalEdge(Number(e.target.value)); removeBackground(); }}
+                                        />
+                                        <span style={{fontSize: '0.7rem', color: '#888'}}>{bgRemovalEdge.toFixed(2)}</span>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="panel">
+                            <h3>Background</h3>
+                            <div className="tabs" style={{marginBottom: 10}}>
+                                <div className={`tab ${backgroundType === 'none' ? 'active' : ''}`} onClick={() => { setBackgroundType('none'); drawOverlay(); }}>None</div>
+                                <div className={`tab ${backgroundType === 'color' ? 'active' : ''}`} onClick={() => { setBackgroundType('color'); drawOverlay(); }}>Color</div>
+                                <div className={`tab ${backgroundType === 'image' ? 'active' : ''}`} onClick={() => setBackgroundType('image')}>Image</div>
+                                <div className={`tab ${backgroundType === 'video' ? 'active' : ''}`} onClick={() => setBackgroundType('video')}>Video</div>
+                            </div>
+
+                            {backgroundType === 'color' && (
+                                <div className="btn-row" style={{alignItems: 'center'}}>
+                                    <label style={{fontSize: '0.8rem', color: '#aaa'}}>Color:</label>
+                                    <input
+                                        type="color"
+                                        value={backgroundColor}
+                                        onChange={e => { setBackgroundColor(e.target.value); drawOverlay(); }}
+                                        style={{flex: 1, height: 35, cursor: 'pointer'}}
+                                    />
+                                </div>
+                            )}
+
+                            {backgroundType === 'image' && (
+                                <div className="btn-row">
+                                    <button className="btn" onClick={() => document.getElementById('bgImgIn').click()}>
+                                        {backgroundImage ? 'Change Image' : 'Load Image'}
+                                    </button>
+                                    <input id="bgImgIn" type="file" onChange={handleBackgroundImageUpload} style={{display:'none'}} accept="image/*" />
+                                    {backgroundImage && (
+                                        <button className="btn btn-danger" onClick={clearBackground}>Clear</button>
+                                    )}
+                                </div>
+                            )}
+
+                            {backgroundType === 'video' && (
+                                <div className="btn-row">
+                                    <button className="btn" onClick={() => document.getElementById('bgVidIn').click()}>
+                                        {backgroundVideo ? 'Change Video' : 'Load Video'}
+                                    </button>
+                                    <input id="bgVidIn" type="file" onChange={handleBackgroundVideoUpload} style={{display:'none'}} accept="video/*" />
+                                    {backgroundVideo && (
+                                        <button className="btn btn-danger" onClick={clearBackground}>Clear</button>
+                                    )}
+                                </div>
+                            )}
+
+                            {bgRemovalEnabled && backgroundType !== 'none' && (
+                                <>
+                                    <h3 style={{marginTop: 15, fontSize: '0.9rem'}}>Character Position</h3>
+                                    <div className="slider-row">
+                                        <label>Horizontal</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="1"
+                                            step="0.01"
+                                            value={characterPosition.x}
+                                            onChange={e => { setCharacterPosition(prev => ({...prev, x: Number(e.target.value)})); drawOverlay(); }}
+                                        />
+                                        <span style={{fontSize: '0.7rem', color: '#888'}}>{(characterPosition.x * 100).toFixed(0)}%</span>
+                                    </div>
+                                    <div className="slider-row">
+                                        <label>Vertical</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="1"
+                                            step="0.01"
+                                            value={characterPosition.y}
+                                            onChange={e => { setCharacterPosition(prev => ({...prev, y: Number(e.target.value)})); drawOverlay(); }}
+                                        />
+                                        <span style={{fontSize: '0.7rem', color: '#888'}}>{(characterPosition.y * 100).toFixed(0)}%</span>
+                                    </div>
+                                    <div className="slider-row">
+                                        <label>Scale</label>
+                                        <input
+                                            type="range"
+                                            min="0.2"
+                                            max="2"
+                                            step="0.05"
+                                            value={characterPosition.scale}
+                                            onChange={e => { setCharacterPosition(prev => ({...prev, scale: Number(e.target.value)})); drawOverlay(); }}
+                                        />
+                                        <span style={{fontSize: '0.7rem', color: '#888'}}>{(characterPosition.scale * 100).toFixed(0)}%</span>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="panel">
                             <h3>Undo/Redo</h3>
                             <div className="btn-row">
                                 <button className="btn" onClick={undo} disabled={historyIndex <= 0}>
@@ -2155,19 +2562,52 @@
                         <div className="panel">
                             <h3>Audio Source</h3>
                             <div className="tabs">
-                                <div className={`tab ${activeTab==='audio'?'active':''}`} onClick={()=>setActiveTab('audio')}>Audio</div>
-                                <div className={`tab ${activeTab==='tts'?'active':''}`} onClick={()=>setActiveTab('tts')}>TTS</div>
+                                <div className={`tab ${audioSource==='none'?'active':''}`} onClick={()=>setAudioSource('none')}>None</div>
+                                <div className={`tab ${audioSource==='file'?'active':''}`} onClick={()=>setAudioSource('file')}>File</div>
+                                <div className={`tab ${audioSource==='record'?'active':''}`} onClick={()=>setAudioSource('record')}>Record</div>
+                                <div className={`tab ${audioSource==='video'?'active':''}`} onClick={()=>setAudioSource('video')}>Video</div>
+                                <div className={`tab ${audioSource==='tts'?'active':''}`} onClick={()=>setAudioSource('tts')}>TTS</div>
                             </div>
-                            {activeTab==='audio' ? (
+
+                            {audioSource === 'none' && (
+                                <div style={{padding: '15px 0', color: '#888', textAlign: 'center', fontSize: '0.85rem'}}>
+                                    Animation will play without audio.<br/>
+                                    Mouth will use fallback sine wave motion.
+                                </div>
+                            )}
+
+                            {audioSource === 'file' && (
                                 <div>
-                                    <input type="file" accept="audio/*" onChange={(e)=>{if(e.target.files[0])setAudioUrl(URL.createObjectURL(e.target.files[0]))}} />
+                                    <input type="file" accept="audio/*" onChange={(e)=>{if(e.target.files[0]){setAudioUrl(URL.createObjectURL(e.target.files[0])); setActiveTab('audio');}}} style={{marginTop: 10}} />
                                     {audioUrl && <audio src={audioUrl} controls style={{width:'100%', marginTop:10}} />}
+                                </div>
+                            )}
+
+                            {audioSource === 'record' && (
+                                <div>
                                     <div className="btn-row" style={{marginTop: 10}}>
                                         <button className="btn" onClick={startVoiceRecord} disabled={isRecordingVoice}>Record Voice</button>
                                         <button className="btn btn-danger" onClick={stopVoiceRecord} disabled={!isRecordingVoice}>Stop Recording</button>
                                     </div>
+                                    {audioUrl && <audio src={audioUrl} controls style={{width:'100%', marginTop:10}} />}
                                 </div>
-                            ) : (
+                            )}
+
+                            {audioSource === 'video' && (
+                                <div style={{padding: '10px 0'}}>
+                                    {backgroundType === 'video' && backgroundVideo ? (
+                                        <div style={{color: '#00ff99', fontSize: '0.85rem'}}>
+                                            Audio will be synced from the loaded background video.
+                                        </div>
+                                    ) : (
+                                        <div style={{color: '#ff6666', fontSize: '0.85rem'}}>
+                                            Load a background video first to use its audio.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {audioSource === 'tts' && (
                                 <div>
                                     <textarea value={text} onChange={e=>setText(e.target.value)} style={{width:'100%', background:'#1a1a1a', color:'#fff', border:'none', padding:10, borderRadius:4, minHeight:60}} />
 
@@ -2530,6 +2970,38 @@
                                 <button className="btn" onClick={saveDraft}>Save Draft</button>
                                 <button className="btn btn-danger" onClick={clearDraft}>Clear Draft</button>
                             </div>
+                        </div>
+
+                        <div className="panel">
+                            <h3>Export Options</h3>
+                            <label style={{display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 8}}>
+                                <input
+                                    type="checkbox"
+                                    checked={exportWithAudio}
+                                    onChange={e => setExportWithAudio(e.target.checked)}
+                                    style={{accentColor: 'var(--accent)'}}
+                                />
+                                <span style={{fontSize: '0.85rem'}}>Include Audio</span>
+                            </label>
+                            <label style={{display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer'}}>
+                                <input
+                                    type="checkbox"
+                                    checked={exportWithBackground}
+                                    onChange={e => setExportWithBackground(e.target.checked)}
+                                    style={{accentColor: 'var(--accent)'}}
+                                />
+                                <span style={{fontSize: '0.85rem'}}>Include Background</span>
+                            </label>
+                            {!exportWithAudio && (
+                                <p style={{fontSize: '0.7rem', color: '#888', marginTop: 8}}>
+                                    Video will be exported without sound.
+                                </p>
+                            )}
+                            {!exportWithBackground && bgRemovalEnabled && (
+                                <p style={{fontSize: '0.7rem', color: '#888', marginTop: 8}}>
+                                    Character will be exported on transparent/black background.
+                                </p>
+                            )}
                         </div>
 
                         {!isAnimating ? (
