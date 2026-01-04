@@ -1163,6 +1163,10 @@
 
             const processFrame = (openAmount, ctx, bounds, mouthBuffer, maskData) => {
                 if (!originalImageDataRef.current) return;
+                if (!mouthTextureRef.current) {
+                    console.error('Mouth texture not generated!');
+                    return;
+                }
 
                 const currentImg = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
                 const dst = currentImg.data;
@@ -1433,7 +1437,7 @@
                         const t = srcY - y0;
 
                         const i0 = (y0 * w + x) * 4;
-                        const i1 = Math.min((y0 + 1) * w * 4, eyeBuffer.length - 4);
+                        const i1 = Math.min(((y0 + 1) * w + x) * 4, eyeBuffer.length - 4);
 
                         const r = Math.round(eyeBuffer[i0] * (1 - t) + eyeBuffer[i1] * t);
                         const g = Math.round(eyeBuffer[i0 + 1] * (1 - t) + eyeBuffer[i1 + 1] * t);
@@ -1744,8 +1748,8 @@
                     const maxOpen = bounds.height * 0.45;
                     const openPixels = Math.floor(currentOpenness * maxOpen);
 
-                    if (frameCount === 1) {
-                        console.log('Processing first frame - openPixels:', openPixels, 'bounds:', bounds);
+                    if (frameCount === 1 || frameCount % 60 === 0) {
+                        console.log('Frame', frameCount, '- target:', target.toFixed(3), 'currentOpenness:', currentOpenness.toFixed(3), 'openPixels:', openPixels, 'bounds:', bounds.width + 'x' + bounds.height);
                     }
 
                     // Only process mouth if enabled
