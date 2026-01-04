@@ -71,10 +71,10 @@
             const [polyPoints, setPolyPoints] = React.useState([]); 
             const [draggedPointIndex, setDraggedPointIndex] = React.useState(null);
             
-            const [manualBoxMode, setManualBoxMode] = React.useState(false);
-            const [isBoxSelecting, setIsBoxSelecting] = React.useState(false);
-            const boxStartRef = React.useRef(null);
-            const [boxRect, setBoxRect] = React.useState(null);
+            // Manual Draw mode (replaces Manual Box)
+            const [manualDrawMode, setManualDrawMode] = React.useState(false);
+            const [manualDrawFeature, setManualDrawFeature] = React.useState('mouth');
+            const [drawingPoints, setDrawingPoints] = React.useState([]);
 
             const [isDraggingPoly, setIsDraggingPoly] = React.useState(false);
             const polyDragStartRef = React.useRef(null);
@@ -476,35 +476,6 @@
                 return Math.sqrt(Math.pow(p.x - proj.x, 2) + Math.pow(p.y - proj.y, 2));
             };
 
-            const normRect = (a, b) => {
-                const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y);
-                const x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y);
-                return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
-            };
-
-            const polyFromRect = (r) => {
-                const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-                const pts = [];
-                const n = 12;
-                for (let i = 0; i < n; i++) {
-                    const t = (i / n) * Math.PI * 2;
-                    pts.push({ x: cx + Math.cos(t) * (r.w * 0.5), y: cy + Math.sin(t) * (r.h * 0.5) });
-                }
-                return pts;
-            };
-
-            const drawBoxOverlay = (r) => {
-                drawOverlay(); // restore image + current polygon
-                if (!r) return;
-                const ctx = canvasRef.current.getContext('2d');
-                ctx.save();
-                ctx.strokeStyle = '#00ff99';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([6, 4]);
-                ctx.strokeRect(r.x, r.y, r.w, r.h);
-                ctx.restore();
-            };
-
             const pointInPoly = (pt, poly) => {
                 if (!poly || poly.length < 3) return false;
                 let inside = false;
@@ -562,23 +533,27 @@
             const handleMouseDown = (e) => {
                 if (isAnimating || !image) return;
 
-                // For manual box mode, use raw canvas coordinates
-                if (manualBoxMode || e.shiftKey) {
-                    const rect = canvasRef.current.getBoundingClientRect();
-                    const scaleX = canvasRef.current.width / rect.width;
-                    const scaleY = canvasRef.current.height / rect.height;
-                    let canvasX, canvasY;
-                    if (e.touches && e.touches.length > 0) {
-                        canvasX = (e.touches[0].clientX - rect.left) * scaleX;
-                        canvasY = (e.touches[0].clientY - rect.top) * scaleY;
-                    } else {
-                        canvasX = (e.clientX - rect.left) * scaleX;
-                        canvasY = (e.clientY - rect.top) * scaleY;
+                // For manual draw mode, place anchor points on click
+                if (manualDrawMode) {
+                    const m = getCoords(e);
+
+                    // Check if clicking near the first point to close the loop
+                    if (drawingPoints.length >= 3 && isNearPoint(m, drawingPoints[0], 15)) {
+                        // Close the loop - apply the points to the selected feature
+                        const newPoints = [...drawingPoints];
+                        updatePolygon(manualDrawFeature, newPoints);
+                        setDrawingPoints([]);
+                        setManualDrawMode(false);
+                        setStatus(`${manualDrawFeature} shape applied. Refine points or start animation.`);
+                        saveToHistory();
+                        drawOverlay();
+                        return;
                     }
-                    setIsBoxSelecting(true);
-                    boxStartRef.current = { x: canvasX, y: canvasY };
-                    setBoxRect({ x: canvasX, y: canvasY, w: 0, h: 0 });
-                    drawBoxOverlay({ x: canvasX, y: canvasY, w: 0, h: 0 });
+
+                    // Add a new anchor point
+                    const newPoints = [...drawingPoints, m];
+                    setDrawingPoints(newPoints);
+                    drawOverlay();
                     return;
                 }
 
@@ -696,10 +671,32 @@
 
                 const m = getCoords(e);
 
-                if (isBoxSelecting && boxStartRef.current) {
-                    const r = normRect(boxStartRef.current, m);
-                    setBoxRect(r);
-                    drawBoxOverlay(r);
+                // Manual draw mode - update cursor and draw preview line
+                if (manualDrawMode && drawingPoints.length > 0) {
+                    // Draw preview line from last point to current mouse position
+                    drawOverlay();
+                    const ctx = canvasRef.current.getContext('2d');
+                    const lastPt = transformPointToCanvas(drawingPoints[drawingPoints.length - 1]);
+                    const currentPt = transformPointToCanvas(m);
+                    ctx.strokeStyle = '#00ff99';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([6, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(lastPt.x, lastPt.y);
+                    ctx.lineTo(currentPt.x, currentPt.y);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Highlight first point if near it (to indicate loop closure)
+                    if (drawingPoints.length >= 3 && isNearPoint(m, drawingPoints[0], 15)) {
+                        const firstPt = transformPointToCanvas(drawingPoints[0]);
+                        ctx.strokeStyle = '#00ff99';
+                        ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.arc(firstPt.x, firstPt.y, 10, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                    canvasRef.current.style.cursor = 'crosshair';
                     return;
                 }
 
@@ -750,22 +747,6 @@
                 if (zoomOutHoldTimerRef.current) {
                     clearTimeout(zoomOutHoldTimerRef.current);
                     zoomOutHoldTimerRef.current = null;
-                }
-
-                if (isBoxSelecting && boxStartRef.current && boxRect) {
-                    setIsBoxSelecting(false);
-                    boxStartRef.current = null;
-
-                    if (boxRect.w > 10 && boxRect.h > 10) {
-                        const pts = polyFromRect(boxRect);
-                        setPolyPoints(pts); // Default to mouth for manual box
-                        setStatus("Manual mouth selection applied. Refine points or start animation.");
-                        saveToHistory();
-                        drawOverlay();
-                    }
-                    setBoxRect(null);
-                    setManualBoxMode(false);
-                    return;
                 }
 
                 // Save to history if we were dragging
@@ -1909,6 +1890,34 @@
                     drawEyebrowOverlay(rightEyebrowPoints);
                 }
 
+                // Drawing-in-progress points (manual draw mode)
+                if (manualDrawMode && drawingPoints.length > 0) {
+                    ctx.strokeStyle = '#00ff99'; ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    const firstPt = transformPointToCanvas(drawingPoints[0]);
+                    ctx.moveTo(firstPt.x, firstPt.y);
+                    for (let i = 1; i < drawingPoints.length; i++) {
+                        const pt = transformPointToCanvas(drawingPoints[i]);
+                        ctx.lineTo(pt.x, pt.y);
+                    }
+                    ctx.stroke();
+
+                    // Draw anchor points
+                    drawingPoints.forEach((p, idx) => {
+                        const pt = transformPointToCanvas(p);
+                        ctx.fillStyle = idx === 0 ? '#00ff99' : '#fff';
+                        ctx.beginPath();
+                        ctx.arc(pt.x, pt.y, idx === 0 ? 6 : 4, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+
+                    // Show instruction text
+                    ctx.fillStyle = '#00ff99';
+                    ctx.font = '14px sans-serif';
+                    const featureLabels = { mouth: 'Mouth', leftEye: 'Left Eye', rightEye: 'Right Eye', leftBrow: 'Left Eyebrow', rightBrow: 'Right Eyebrow' };
+                    ctx.fillText(`Drawing ${featureLabels[manualDrawFeature]} - Click to place points, click on green dot to close`, 20, canvasRef.current.height - 20);
+                }
+
                 // Guides for mouth
                 if (polyPoints.length > 0) {
                     const b = getBounds(polyPoints);
@@ -1972,18 +1981,57 @@
                             <h3>Setup</h3>
                             <div className="btn-row">
                                 <button className="btn" onClick={autoDetect} disabled={!image || isAnimating}>Auto-Detect</button>
-
-                                <button
-                                    className={`btn ${manualBoxMode ? 'btn-primary' : ''}`}
-                                    onClick={() => setManualBoxMode(v => !v)}
-                                    disabled={!image || isAnimating}
-                                    title="Click, then drag a box over the mouth or eyes"
-                                >
-                                    {manualBoxMode ? 'Manual Box: ON' : 'Manual Box'}
-                                </button>
-
                                 <button className="btn btn-danger" onClick={resetAll}>Reset</button>
                             </div>
+
+                            <h3 style={{marginTop: 15, fontSize: '0.9rem'}}>Manual Draw</h3>
+                            <div className="btn-row" style={{alignItems: 'center'}}>
+                                <select
+                                    value={manualDrawFeature}
+                                    onChange={e => setManualDrawFeature(e.target.value)}
+                                    disabled={!image || isAnimating || manualDrawMode}
+                                    style={{
+                                        flex: 1,
+                                        padding: '10px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #444',
+                                        background: '#2a2a2a',
+                                        color: '#fff',
+                                        fontSize: '0.85rem',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    <option value="mouth">Mouth</option>
+                                    <option value="leftEye">Left Eye</option>
+                                    <option value="rightEye">Right Eye</option>
+                                    <option value="leftBrow">Left Eyebrow</option>
+                                    <option value="rightBrow">Right Eyebrow</option>
+                                </select>
+                                <button
+                                    className={`btn ${manualDrawMode ? 'btn-primary' : ''}`}
+                                    onClick={() => {
+                                        if (manualDrawMode) {
+                                            setManualDrawMode(false);
+                                            setDrawingPoints([]);
+                                            drawOverlay();
+                                        } else {
+                                            setManualDrawMode(true);
+                                            setDrawingPoints([]);
+                                        }
+                                    }}
+                                    disabled={!image || isAnimating}
+                                    title="Click to place anchor points, click on first point to close the shape"
+                                    style={{minWidth: '100px'}}
+                                >
+                                    {manualDrawMode ? 'Cancel' : 'Draw'}
+                                </button>
+                            </div>
+                            {manualDrawMode && (
+                                <p style={{fontSize: '0.75rem', color: '#00ff99', marginTop: 8}}>
+                                    Click to place points. Click on the green dot to close the shape.
+                                    {drawingPoints.length > 0 && ` (${drawingPoints.length} points placed)`}
+                                </p>
+                            )}
 
                             <h3 style={{marginTop: 15, fontSize: '0.9rem'}}>Zoom & Pan</h3>
                             <div className="btn-row">
@@ -2049,7 +2097,7 @@
                             )}
 
                             <div className="hint">
-                                Tip: Drag points to refine. Drag inside the shape to move it. Box-select with Shift+drag or Manual Box.
+                                Tip: Drag points to refine. Drag inside the shape to move it. Use Manual Draw to create shapes by clicking.
                             </div>
                         </div>
 
