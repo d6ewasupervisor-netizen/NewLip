@@ -2182,6 +2182,29 @@
                     });
                 }
 
+                // Manual drawing anchor points
+                if (manualDrawMode && drawingPoints.length > 0) {
+                    // Draw the outline connecting the points
+                    ctx.strokeStyle = '#ff9900';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    for (let i = 0; i < drawingPoints.length; i++) {
+                        const pt = transformPointToCanvas(drawingPoints[i]);
+                        if (i === 0) ctx.moveTo(pt.x, pt.y);
+                        else ctx.lineTo(pt.x, pt.y);
+                    }
+                    ctx.stroke();
+
+                    // Draw anchor points
+                    ctx.fillStyle = '#ff9900';
+                    drawingPoints.forEach(p => {
+                        const pt = transformPointToCanvas(p);
+                        ctx.beginPath();
+                        ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+                }
+
                 // Lip width box (visual guide)
                 if (polyPoints.length > 0) {
                     const b = getBounds(polyPoints);
