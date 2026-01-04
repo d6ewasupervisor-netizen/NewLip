@@ -764,20 +764,14 @@
                             setDraggedPointIndex(clicked.pointIndex);
                             setDraggedEye(clicked.type);
                         } else {
-                            // Clicked inside polygon - start hold timer to zoom out for repositioning
+                            // Clicked inside polygon - start hold timer to begin dragging at 50% speed
                             zoomOutHoldTimerRef.current = setTimeout(() => {
-                                setIsZoomed(false);
-                                setZoomScale(1.0);
-                                setPanOffset({ x: 0, y: 0 });
-
-                                // Start dragging after zoom reset
-                                setTimeout(() => {
-                                    setIsDraggingPoly(true);
-                                    setDraggedEye(clicked.type);
-                                    polyDragStartRef.current = m;
-                                    polyDragOrigRef.current = clicked.points.map(p => ({ ...p }));
-                                }, 50);
-                            }, 500); // Hold for 500ms to trigger zoom out
+                                // Start dragging the polygon while staying zoomed (movement will be 50% speed)
+                                setIsDraggingPoly(true);
+                                setDraggedEye(clicked.type);
+                                polyDragStartRef.current = m;
+                                polyDragOrigRef.current = clicked.points.map(p => ({ ...p }));
+                            }, 200); // Short hold to distinguish from accidental clicks
                         }
                     } else {
                         // Start panning
@@ -897,8 +891,15 @@
                 }
 
                 if (isDraggingPoly && polyDragStartRef.current && polyDragOrigRef.current && draggedEye) {
-                    const dx = m.x - polyDragStartRef.current.x;
-                    const dy = m.y - polyDragStartRef.current.y;
+                    let dx = m.x - polyDragStartRef.current.x;
+                    let dy = m.y - polyDragStartRef.current.y;
+
+                    // Apply 50% movement reduction when zoomed for fine-tuned positioning
+                    if (isZoomed && zoomScale > 1.0) {
+                        dx *= 0.5;
+                        dy *= 0.5;
+                    }
+
                     updatePolygon(draggedEye, polyDragOrigRef.current.map(p => ({ x: p.x + dx, y: p.y + dy })));
                     return;
                 }
