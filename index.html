@@ -786,6 +786,16 @@
                 return baseRadius;
             };
 
+            // Get anchor point rendering radius adjusted for zoom level
+            // When zoomed in, anchor points need to be drawn larger in canvas space
+            // to maintain consistent screen size
+            const getAnchorRadius = (baseRadius = 8) => {
+                if (isZoomed && zoomScale > 1.0) {
+                    return baseRadius * zoomScale;
+                }
+                return baseRadius;
+            };
+
             const generateLipLine = (mouthBounds) => {
                 if (!mouthBounds || !polyPoints.length) return [];
 
@@ -2460,7 +2470,7 @@
                     polyPoints.forEach(p => {
                         const pt = transformPt(p);
                         ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+                        ctx.arc(pt.x, pt.y, getAnchorRadius(), 0, Math.PI * 2);
                         ctx.fill();
                     });
                 }
@@ -2482,7 +2492,7 @@
                         eyePoints.forEach(p => {
                             const pt = transformPt(p);
                             ctx.beginPath();
-                            ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+                            ctx.arc(pt.x, pt.y, getAnchorRadius(), 0, Math.PI * 2);
                             ctx.fill();
                         });
                     }
@@ -2509,7 +2519,7 @@
                         browPoints.forEach(p => {
                             const pt = transformPt(p);
                             ctx.beginPath();
-                            ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+                            ctx.arc(pt.x, pt.y, getAnchorRadius(), 0, Math.PI * 2);
                             ctx.fill();
                         });
                     }
@@ -2534,7 +2544,7 @@
                     lipLinePoints.forEach(p => {
                         const pt = transformPt(p);
                         ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
+                        ctx.arc(pt.x, pt.y, getAnchorRadius(), 0, Math.PI * 2);
                         ctx.fill();
                     });
                 }
