@@ -72,10 +72,14 @@
             const [polyPoints, setPolyPoints] = React.useState([]); 
             const [draggedPointIndex, setDraggedPointIndex] = React.useState(null);
             
-            // Manual Draw mode (replaces Manual Box)
+            // Manual Draw mode - now drops predefined shapes
             const [manualDrawMode, setManualDrawMode] = React.useState(false);
             const [manualDrawFeature, setManualDrawFeature] = React.useState('mouth');
-            const [drawingPoints, setDrawingPoints] = React.useState([]);
+            const [shapePreviewPos, setShapePreviewPos] = React.useState(null); // {x, y} for shape preview
+
+            // Pinch-to-zoom state
+            const lastPinchDistRef = React.useRef(null);
+            const pinchCenterRef = React.useRef(null);
 
             const [isDraggingPoly, setIsDraggingPoly] = React.useState(false);
             const polyDragStartRef = React.useRef(null);
@@ -97,7 +101,6 @@
             const [isPanning, setIsPanning] = React.useState(false);
             const panStartRef = React.useRef(null);
             const panOffsetStartRef = React.useRef(null);
-            const zoomOutHoldTimerRef = React.useRef(null);
 
             // Feature toggles
             const [enableMouth, setEnableMouth] = React.useState(true);
@@ -200,6 +203,59 @@
                     if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y;
                 });
                 return { x: Math.floor(minX), y: Math.floor(minY), width: Math.ceil(maxX - minX), height: Math.ceil(maxY - minY) };
+            };
+
+            // Generate basic shapes for manual placement
+            const generateBasicShape = (feature, centerX, centerY, canvasWidth, canvasHeight) => {
+                // Scale shapes based on canvas size (assume face takes ~30% of image width)
+                const baseScale = Math.min(canvasWidth, canvasHeight) * 0.15;
+                const points = [];
+
+                switch (feature) {
+                    case 'mouth': {
+                        // Oval mouth shape with 12 points
+                        const w = baseScale * 1.2;
+                        const h = baseScale * 0.6;
+                        for (let i = 0; i < 12; i++) {
+                            const angle = (i / 12) * Math.PI * 2;
+                            points.push({
+                                x: centerX + Math.cos(angle) * w,
+                                y: centerY + Math.sin(angle) * h
+                            });
+                        }
+                        break;
+                    }
+                    case 'leftEye':
+                    case 'rightEye': {
+                        // Almond-shaped eye with 6 points
+                        const w = baseScale * 0.5;
+                        const h = baseScale * 0.25;
+                        // Create almond shape
+                        points.push({ x: centerX - w, y: centerY }); // left corner
+                        points.push({ x: centerX - w * 0.5, y: centerY - h }); // top left
+                        points.push({ x: centerX + w * 0.5, y: centerY - h }); // top right
+                        points.push({ x: centerX + w, y: centerY }); // right corner
+                        points.push({ x: centerX + w * 0.5, y: centerY + h * 0.7 }); // bottom right
+                        points.push({ x: centerX - w * 0.5, y: centerY + h * 0.7 }); // bottom left
+                        break;
+                    }
+                    case 'leftBrow':
+                    case 'rightBrow': {
+                        // Curved eyebrow with 5 points
+                        const w = baseScale * 0.6;
+                        const h = baseScale * 0.15;
+                        const flip = feature === 'rightBrow' ? -1 : 1;
+                        points.push({ x: centerX - w, y: centerY + h * 0.5 * flip });
+                        points.push({ x: centerX - w * 0.5, y: centerY - h * flip });
+                        points.push({ x: centerX, y: centerY - h * 1.2 * flip });
+                        points.push({ x: centerX + w * 0.5, y: centerY - h * 0.8 * flip });
+                        points.push({ x: centerX + w, y: centerY });
+                        break;
+                    }
+                    default:
+                        break;
+                }
+                return points;
             };
 
             // --- UNDO/REDO SYSTEM ---
@@ -782,96 +838,80 @@
             const handleMouseDown = (e) => {
                 if (isAnimating || !image) return;
 
-                // For manual draw mode, place anchor points on click
+                // For manual draw mode - drop predefined shape on click
                 if (manualDrawMode) {
                     const m = getCoords(e);
+                    const cw = canvasRef.current.width;
+                    const ch = canvasRef.current.height;
 
-                    // Check if clicking near the first point to close the loop
-                    if (drawingPoints.length >= 3 && isNearPoint(m, drawingPoints[0], getHitRadius(15))) {
-                        // Close the loop - apply the points to the selected feature
-                        const newPoints = [...drawingPoints];
-                        updatePolygon(manualDrawFeature, newPoints);
-                        setDrawingPoints([]);
-                        setManualDrawMode(false);
-                        setStatus(`${manualDrawFeature} shape applied. Refine points or start animation.`);
+                    // Generate and place the shape at click position
+                    const shapePoints = generateBasicShape(manualDrawFeature, m.x, m.y, cw, ch);
+
+                    if (shapePoints.length > 0) {
+                        // Map feature to correct polygon type
+                        let targetType = manualDrawFeature;
+                        if (manualDrawFeature === 'leftBrow') targetType = 'leftEye';
+                        if (manualDrawFeature === 'rightBrow') targetType = 'rightEye';
+
+                        updatePolygon(targetType, shapePoints);
+
+                        // Generate lip line if placing mouth
+                        if (manualDrawFeature === 'mouth') {
+                            const mouthBounds = getBounds(shapePoints);
+                            setLipLinePoints(generateLipLine(mouthBounds));
+                        }
+
                         saveToHistory();
+                        setManualDrawMode(false);
+                        setShapePreviewPos(null);
+                        setStatus(`${manualDrawFeature} placed. Drag points to refine, double-click edge to add points.`);
                         drawOverlay();
-                        return;
                     }
-
-                    // Add a new anchor point
-                    const newPoints = [...drawingPoints, m];
-                    setDrawingPoints(newPoints);
-                    drawOverlay();
                     return;
                 }
 
                 const m = getCoords(e);
                 const clicked = findClickedPolygon(m);
 
-                // If zoomed in
-                if (isZoomed && zoomScale > 1.0) {
-                    if (clicked) {
-                        if (clicked.pointIndex !== -1) {
-                            // Clicked on a point - allow dragging while zoomed (don't zoom out)
-                            setDraggedPointIndex(clicked.pointIndex);
-                            setDraggedEye(clicked.type);
-                        } else {
-                            // Clicked inside polygon - start hold timer to begin dragging at 50% speed
-                            zoomOutHoldTimerRef.current = setTimeout(() => {
-                                // Start dragging the polygon while staying zoomed (movement will be 50% speed)
-                                setIsDraggingPoly(true);
-                                setDraggedEye(clicked.type);
-                                polyDragStartRef.current = m;
-                                polyDragOrigRef.current = clicked.points.map(p => ({ ...p }));
-                            }, 200); // Short hold to distinguish from accidental clicks
-                        }
+                // Check if we clicked on a polygon or point
+                if (clicked) {
+                    if (clicked.pointIndex !== -1) {
+                        // Clicked on a point - start dragging it
+                        setDraggedPointIndex(clicked.pointIndex);
+                        setDraggedEye(clicked.type);
                     } else {
-                        // Start panning
-                        setIsPanning(true);
-                        const rect = canvasRef.current.getBoundingClientRect();
-                        const scaleX = canvasRef.current.width / rect.width;
-                        const scaleY = canvasRef.current.height / rect.height;
-                        if (e.touches && e.touches.length > 0) {
-                            panStartRef.current = {
-                                x: (e.touches[0].clientX - rect.left) * scaleX,
-                                y: (e.touches[0].clientY - rect.top) * scaleY
-                            };
-                        } else {
-                            panStartRef.current = {
-                                x: (e.clientX - rect.left) * scaleX,
-                                y: (e.clientY - rect.top) * scaleY
-                            };
-                        }
-                        panOffsetStartRef.current = { ...panOffset };
+                        // Clicked inside polygon - drag whole polygon
+                        setIsDraggingPoly(true);
+                        setDraggedEye(clicked.type);
+                        polyDragStartRef.current = m;
+                        polyDragOrigRef.current = clicked.points.map(p => ({ ...p }));
                     }
                     return;
                 }
 
-                // Normal mode (not zoomed) - allow dragging
-                if (!clicked) return;
-
-                if (clicked.pointIndex !== -1) {
-                    // Clicked on a point
-                    setDraggedPointIndex(clicked.pointIndex);
-                    setDraggedEye(clicked.type);
-                } else {
-                    // Clicked inside polygon (drag whole polygon)
-                    setIsDraggingPoly(true);
-                    setDraggedEye(clicked.type);
-                    polyDragStartRef.current = m;
-                    polyDragOrigRef.current = clicked.points.map(p => ({ ...p }));
+                // No polygon clicked - start panning if zoomed
+                if (zoomScale > 1.0) {
+                    setIsPanning(true);
+                    const rect = canvasRef.current.getBoundingClientRect();
+                    const scaleX = canvasRef.current.width / rect.width;
+                    const scaleY = canvasRef.current.height / rect.height;
+                    if (e.touches && e.touches.length > 0) {
+                        panStartRef.current = {
+                            x: (e.touches[0].clientX - rect.left) * scaleX,
+                            y: (e.touches[0].clientY - rect.top) * scaleY
+                        };
+                    } else {
+                        panStartRef.current = {
+                            x: (e.clientX - rect.left) * scaleX,
+                            y: (e.clientY - rect.top) * scaleY
+                        };
+                    }
+                    panOffsetStartRef.current = { ...panOffset };
                 }
             };
 
             const handleMouseMove = (e) => {
                 if (!image) return;
-
-                // Clear zoom-out hold timer if mouse moves (user is panning/dragging, not holding)
-                if (zoomOutHoldTimerRef.current) {
-                    clearTimeout(zoomOutHoldTimerRef.current);
-                    zoomOutHoldTimerRef.current = null;
-                }
 
                 // Handle panning when zoomed
                 if (isPanning && panStartRef.current && panOffsetStartRef.current) {
@@ -914,31 +954,44 @@
 
                 const m = getCoords(e);
 
-                // Manual draw mode - update cursor and draw preview line
-                if (manualDrawMode && drawingPoints.length > 0) {
-                    // Draw preview line from last point to current mouse position
+                // Manual draw mode - show shape preview following cursor
+                if (manualDrawMode) {
+                    setShapePreviewPos(m);
                     drawOverlay();
-                    const ctx = canvasRef.current.getContext('2d');
-                    const lastPt = transformPointToCanvas(drawingPoints[drawingPoints.length - 1], isZoomed, zoomScale, panOffset);
-                    const currentPt = transformPointToCanvas(m, isZoomed, zoomScale, panOffset);
-                    ctx.strokeStyle = '#00ff99';
-                    ctx.lineWidth = 2;
-                    ctx.setLineDash([6, 4]);
-                    ctx.beginPath();
-                    ctx.moveTo(lastPt.x, lastPt.y);
-                    ctx.lineTo(currentPt.x, currentPt.y);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
 
-                    // Highlight first point if near it (to indicate loop closure)
-                    if (drawingPoints.length >= 3 && isNearPoint(m, drawingPoints[0], getHitRadius(15))) {
-                        const firstPt = transformPointToCanvas(drawingPoints[0], isZoomed, zoomScale, panOffset);
-                        ctx.strokeStyle = '#00ff99';
-                        ctx.lineWidth = 3;
+                    // Draw shape preview at cursor position
+                    const ctx = canvasRef.current.getContext('2d');
+                    const cw = canvasRef.current.width;
+                    const ch = canvasRef.current.height;
+                    const previewPoints = generateBasicShape(manualDrawFeature, m.x, m.y, cw, ch);
+
+                    if (previewPoints.length > 0) {
+                        ctx.strokeStyle = 'rgba(255, 153, 0, 0.7)';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([6, 4]);
                         ctx.beginPath();
-                        ctx.arc(firstPt.x, firstPt.y, 10, 0, Math.PI * 2);
+
+                        const firstPt = transformPointToCanvas(previewPoints[0], zoomScale > 1.0, zoomScale, panOffset);
+                        ctx.moveTo(firstPt.x, firstPt.y);
+
+                        for (let i = 1; i < previewPoints.length; i++) {
+                            const pt = transformPointToCanvas(previewPoints[i], zoomScale > 1.0, zoomScale, panOffset);
+                            ctx.lineTo(pt.x, pt.y);
+                        }
+                        ctx.closePath();
                         ctx.stroke();
+                        ctx.setLineDash([]);
+
+                        // Draw preview anchor points
+                        ctx.fillStyle = 'rgba(255, 153, 0, 0.5)';
+                        previewPoints.forEach(p => {
+                            const pt = transformPointToCanvas(p, zoomScale > 1.0, zoomScale, panOffset);
+                            ctx.beginPath();
+                            ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                            ctx.fill();
+                        });
                     }
+
                     canvasRef.current.style.cursor = 'crosshair';
                     return;
                 }
@@ -992,12 +1045,6 @@
             };
 
             const handleMouseUp = () => {
-                // Clear zoom-out hold timer if it's pending
-                if (zoomOutHoldTimerRef.current) {
-                    clearTimeout(zoomOutHoldTimerRef.current);
-                    zoomOutHoldTimerRef.current = null;
-                }
-
                 // Save to history if we were dragging
                 if (draggedPointIndex !== null || draggedEye !== null || isDraggingPoly) {
                     saveToHistory();
@@ -1013,6 +1060,64 @@
                 setIsDraggingPoly(false);
                 polyDragStartRef.current = null;
                 polyDragOrigRef.current = null;
+            };
+
+            // Mouse wheel zoom handler
+            const handleWheel = (e) => {
+                if (!image || isAnimating) return;
+                e.preventDefault();
+
+                const rect = canvasRef.current.getBoundingClientRect();
+                const scaleX = canvasRef.current.width / rect.width;
+                const scaleY = canvasRef.current.height / rect.height;
+
+                // Get mouse position in canvas coordinates
+                const mouseX = (e.clientX - rect.left) * scaleX;
+                const mouseY = (e.clientY - rect.top) * scaleY;
+
+                // Convert to image space
+                const imageWidth = canvasRef.current.width;
+                const imageHeight = canvasRef.current.height;
+
+                // Calculate zoom direction
+                const zoomDelta = e.deltaY > 0 ? 0.9 : 1.1; // Scroll down = zoom out, scroll up = zoom in
+                const newZoomScale = Math.max(1.0, Math.min(5.0, zoomScale * zoomDelta));
+
+                if (newZoomScale === zoomScale) return;
+
+                // Calculate new viewport size
+                const newViewportWidth = imageWidth / newZoomScale;
+                const newViewportHeight = imageHeight / newZoomScale;
+
+                // Get mouse position in image space (before zoom)
+                let imageMouseX, imageMouseY;
+                if (zoomScale > 1.0) {
+                    const viewportWidth = imageWidth / zoomScale;
+                    const viewportHeight = imageHeight / zoomScale;
+                    imageMouseX = (mouseX / imageWidth) * viewportWidth + panOffset.x;
+                    imageMouseY = (mouseY / imageHeight) * viewportHeight + panOffset.y;
+                } else {
+                    imageMouseX = mouseX;
+                    imageMouseY = mouseY;
+                }
+
+                // Calculate new pan offset to keep mouse position stable
+                let newPanX = imageMouseX - (mouseX / imageWidth) * newViewportWidth;
+                let newPanY = imageMouseY - (mouseY / imageHeight) * newViewportHeight;
+
+                // Clamp pan offset
+                newPanX = Math.max(0, Math.min(imageWidth - newViewportWidth, newPanX));
+                newPanY = Math.max(0, Math.min(imageHeight - newViewportHeight, newPanY));
+
+                if (newZoomScale <= 1.0) {
+                    newPanX = 0;
+                    newPanY = 0;
+                }
+
+                setZoomScale(newZoomScale);
+                setIsZoomed(newZoomScale > 1.0);
+                setPanOffset({ x: newPanX, y: newPanY });
+                setTimeout(drawOverlay, 10);
             };
 
             const handleDoubleClick = (e) => {
@@ -1049,23 +1154,103 @@
                 }
             };
 
-            // Touch event handlers for mobile support
+            // Touch event handlers for mobile support with pinch-to-zoom
             const handleTouchStart = (e) => {
                 // Don't prevent default if there's no image (allows upload zone to work)
                 if (!image) return;
-                e.preventDefault(); // Prevent scrolling while touching canvas
+                e.preventDefault();
+
+                // Check for pinch gesture (two fingers)
+                if (e.touches.length === 2) {
+                    const touch1 = e.touches[0];
+                    const touch2 = e.touches[1];
+                    const dist = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
+                    lastPinchDistRef.current = dist;
+
+                    // Store pinch center for zoom focus
+                    const rect = canvasRef.current.getBoundingClientRect();
+                    const scaleX = canvasRef.current.width / rect.width;
+                    const scaleY = canvasRef.current.height / rect.height;
+                    pinchCenterRef.current = {
+                        x: ((touch1.clientX + touch2.clientX) / 2 - rect.left) * scaleX,
+                        y: ((touch1.clientY + touch2.clientY) / 2 - rect.top) * scaleY
+                    };
+                    return;
+                }
+
+                // Single touch - handle as mouse down
                 handleMouseDown(e);
             };
 
             const handleTouchMove = (e) => {
                 if (!image) return;
                 e.preventDefault();
+
+                // Handle pinch-to-zoom (two fingers)
+                if (e.touches.length === 2 && lastPinchDistRef.current !== null) {
+                    const touch1 = e.touches[0];
+                    const touch2 = e.touches[1];
+                    const newDist = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
+                    const pinchDelta = newDist / lastPinchDistRef.current;
+
+                    if (Math.abs(pinchDelta - 1) > 0.01) { // Threshold to avoid jitter
+                        const imageWidth = canvasRef.current.width;
+                        const imageHeight = canvasRef.current.height;
+
+                        const newZoomScale = Math.max(1.0, Math.min(5.0, zoomScale * pinchDelta));
+
+                        if (newZoomScale !== zoomScale && pinchCenterRef.current) {
+                            const newViewportWidth = imageWidth / newZoomScale;
+                            const newViewportHeight = imageHeight / newZoomScale;
+
+                            // Get pinch center in image space
+                            let imageCenterX, imageCenterY;
+                            if (zoomScale > 1.0) {
+                                const viewportWidth = imageWidth / zoomScale;
+                                const viewportHeight = imageHeight / zoomScale;
+                                imageCenterX = (pinchCenterRef.current.x / imageWidth) * viewportWidth + panOffset.x;
+                                imageCenterY = (pinchCenterRef.current.y / imageHeight) * viewportHeight + panOffset.y;
+                            } else {
+                                imageCenterX = pinchCenterRef.current.x;
+                                imageCenterY = pinchCenterRef.current.y;
+                            }
+
+                            // Calculate new pan offset to keep pinch center stable
+                            let newPanX = imageCenterX - (pinchCenterRef.current.x / imageWidth) * newViewportWidth;
+                            let newPanY = imageCenterY - (pinchCenterRef.current.y / imageHeight) * newViewportHeight;
+
+                            // Clamp pan offset
+                            newPanX = Math.max(0, Math.min(imageWidth - newViewportWidth, newPanX));
+                            newPanY = Math.max(0, Math.min(imageHeight - newViewportHeight, newPanY));
+
+                            if (newZoomScale <= 1.0) {
+                                newPanX = 0;
+                                newPanY = 0;
+                            }
+
+                            setZoomScale(newZoomScale);
+                            setIsZoomed(newZoomScale > 1.0);
+                            setPanOffset({ x: newPanX, y: newPanY });
+                        }
+
+                        lastPinchDistRef.current = newDist;
+                        drawOverlay();
+                    }
+                    return;
+                }
+
+                // Single touch - handle as mouse move
                 handleMouseMove(e);
             };
 
             const handleTouchEnd = (e) => {
                 if (!image) return;
                 e.preventDefault();
+
+                // Reset pinch state
+                lastPinchDistRef.current = null;
+                pinchCenterRef.current = null;
+
                 handleMouseUp(e);
             };
 
@@ -2262,29 +2447,6 @@
                     });
                 }
 
-                // Manual drawing anchor points
-                if (manualDrawMode && drawingPoints.length > 0) {
-                    // Draw the outline connecting the points
-                    ctx.strokeStyle = '#ff9900';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    for (let i = 0; i < drawingPoints.length; i++) {
-                        const pt = transformPt(drawingPoints[i]);
-                        if (i === 0) ctx.moveTo(pt.x, pt.y);
-                        else ctx.lineTo(pt.x, pt.y);
-                    }
-                    ctx.stroke();
-
-                    // Draw anchor points
-                    ctx.fillStyle = '#ff9900';
-                    drawingPoints.forEach(p => {
-                        const pt = transformPt(p);
-                        ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
-                        ctx.fill();
-                    });
-                }
-
                 // Lip width box (visual guide)
                 if (polyPoints.length > 0) {
                     const b = getBounds(polyPoints);
@@ -2310,6 +2472,8 @@
                         onMouseDown={handleMouseDown}
                         onMouseMove={handleMouseMove}
                         onMouseUp={handleMouseUp}
+                        onMouseLeave={handleMouseUp}
+                        onWheel={handleWheel}
                         onDoubleClick={handleDoubleClick}
                         onTouchStart={handleTouchStart}
                         onTouchMove={handleTouchMove}
@@ -2329,7 +2493,7 @@
                                 <button className="btn btn-danger" onClick={resetAll}>Reset</button>
                             </div>
 
-                            <h3 style={{marginTop: 15, fontSize: '0.9rem'}}>Manual Draw</h3>
+                            <h3 style={{marginTop: 15, fontSize: '0.9rem'}}>Manual Place</h3>
                             <div className="btn-row" style={{alignItems: 'center'}}>
                                 <select
                                     value={manualDrawFeature}
@@ -2357,92 +2521,28 @@
                                     onClick={() => {
                                         if (manualDrawMode) {
                                             setManualDrawMode(false);
-                                            setDrawingPoints([]);
+                                            setShapePreviewPos(null);
                                             drawOverlay();
                                         } else {
                                             setManualDrawMode(true);
-                                            setDrawingPoints([]);
+                                            setShapePreviewPos(null);
                                         }
                                     }}
                                     disabled={!image || isAnimating}
-                                    title="Click to place anchor points, click on first point to close the shape"
+                                    title="Click to place a shape, then drag points to refine"
                                     style={{minWidth: '100px'}}
                                 >
-                                    {manualDrawMode ? 'Cancel' : 'Draw'}
+                                    {manualDrawMode ? 'Cancel' : 'Place'}
                                 </button>
                             </div>
                             {manualDrawMode && (
-                                <p style={{fontSize: '0.75rem', color: '#00ff99', marginTop: 8}}>
-                                    Click to place points. Click on the green dot to close the shape.
-                                    {drawingPoints.length > 0 && ` (${drawingPoints.length} points placed)`}
+                                <p style={{fontSize: '0.75rem', color: '#ff9900', marginTop: 8}}>
+                                    Click anywhere to place the {manualDrawFeature} shape. Drag to position, then click to drop.
                                 </p>
                             )}
 
-                            <h3 style={{marginTop: 15, fontSize: '0.9rem'}}>Zoom & Pan</h3>
-                            <div className="btn-row">
-                                <button
-                                    className={`btn ${isZoomed ? 'btn-primary' : ''}`}
-                                    onClick={() => {
-                                        if (isZoomed) {
-                                            setIsZoomed(false);
-                                            setZoomScale(1.0);
-                                            setPanOffset({ x: 0, y: 0 });
-                                        } else {
-                                            setIsZoomed(true);
-                                            const newZoomScale = 2.5;
-                                            setZoomScale(newZoomScale);
-
-                                            // Auto-center on mouth when zooming in
-                                            if (polyPoints.length > 0 && canvasRef.current) {
-                                                const bounds = getBounds(polyPoints);
-                                                const imageWidth = canvasRef.current.width;
-                                                const imageHeight = canvasRef.current.height;
-                                                const viewportWidth = imageWidth / newZoomScale;
-                                                const viewportHeight = imageHeight / newZoomScale;
-
-                                                // Center the viewport on the mouth center
-                                                const mouthCenterX = bounds.x + bounds.width / 2;
-                                                const mouthCenterY = bounds.y + bounds.height / 2;
-
-                                                let newPanX = mouthCenterX - viewportWidth / 2;
-                                                let newPanY = mouthCenterY - viewportHeight / 2;
-
-                                                // Clamp to image bounds
-                                                newPanX = Math.max(0, Math.min(imageWidth - viewportWidth, newPanX));
-                                                newPanY = Math.max(0, Math.min(imageHeight - viewportHeight, newPanY));
-
-                                                setPanOffset({ x: newPanX, y: newPanY });
-                                            }
-                                        }
-                                        setTimeout(drawOverlay, 10);
-                                    }}
-                                    disabled={!image || isAnimating}
-                                >
-                                    {isZoomed ? 'Zoom Out' : 'Zoom In'}
-                                </button>
-                            </div>
-                            {isZoomed && (
-                                <>
-                                    <div className="slider-row" style={{marginTop: 10}}>
-                                        <label>Zoom Level</label>
-                                        <input
-                                            type="range"
-                                            min="1.5"
-                                            max="5"
-                                            step="0.5"
-                                            value={zoomScale}
-                                            onChange={e => { setZoomScale(Number(e.target.value)); setTimeout(drawOverlay, 10); }}
-                                        />
-                                        <span style={{fontSize: '0.7rem', color: '#888'}}>{zoomScale.toFixed(1)}x</span>
-                                    </div>
-                                    <p style={{fontSize: '0.7rem', color: '#888', marginTop: 5}}>
-                                        Drag to pan. Click selection to reposition (auto-zooms out).
-                                    </p>
-                                </>
-                            )}
-
                             <div className="hint">
-                                Tip: Drag points to refine. Drag inside the shape to move it. Use Manual Draw to create shapes by clicking.
+                                Tip: Scroll to zoom, drag to pan. Drag points to refine. Double-click edge to add points. Drag inside shape to move it.
                             </div>
                         </div>
 
