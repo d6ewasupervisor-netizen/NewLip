@@ -1042,6 +1042,7 @@
                     }
 
                     updatePolygon(draggedEye, polyDragOrigRef.current.map(p => ({ x: p.x + dx, y: p.y + dy })));
+                    drawOverlay();
                     return;
                 }
 
@@ -1057,6 +1058,7 @@
                         const newPoints = [...currentPoints];
                         newPoints[draggedPointIndex] = m;
                         updatePolygon(draggedEye, newPoints);
+                        drawOverlay();
                     }
                     return;
                 }
@@ -1104,6 +1106,8 @@
                 setIsDraggingPoly(false);
                 polyDragStartRef.current = null;
                 polyDragOrigRef.current = null;
+
+                drawOverlay();
             };
 
             // Mouse wheel zoom handler
