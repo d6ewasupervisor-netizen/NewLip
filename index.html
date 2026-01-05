@@ -85,11 +85,16 @@
             const polyDragStartRef = React.useRef(null);
             const polyDragOrigRef = React.useRef(null);
 
-            // Eyes (includes eyebrows for full expression control)
+            // Eyes
             const [leftEyePoints, setLeftEyePoints] = React.useState([]);
             const [rightEyePoints, setRightEyePoints] = React.useState([]);
+
+            // Eyebrows (separate polygons)
+            const [leftBrowPoints, setLeftBrowPoints] = React.useState([]);
+            const [rightBrowPoints, setRightBrowPoints] = React.useState([]);
+
             const [eyePresets, setEyePresets] = React.useState(['blink', 'wink_left', 'look_left', 'look_right']); // Selected eye presets to apply randomly
-            const [draggedEye, setDraggedEye] = React.useState(null); // 'left', 'right'
+            const [draggedEye, setDraggedEye] = React.useState(null); // 'left', 'right', 'leftBrow', 'rightBrow'
 
             // Lip line (editable line following the split between upper and lower lips)
             const [lipLinePoints, setLipLinePoints] = React.useState([]);
@@ -264,7 +269,9 @@
                     polyPoints: JSON.parse(JSON.stringify(polyPoints)),
                     lipLinePoints: JSON.parse(JSON.stringify(lipLinePoints)),
                     leftEyePoints: JSON.parse(JSON.stringify(leftEyePoints)),
-                    rightEyePoints: JSON.parse(JSON.stringify(rightEyePoints))
+                    rightEyePoints: JSON.parse(JSON.stringify(rightEyePoints)),
+                    leftBrowPoints: JSON.parse(JSON.stringify(leftBrowPoints)),
+                    rightBrowPoints: JSON.parse(JSON.stringify(rightBrowPoints))
                 };
 
                 // Truncate history if we're not at the end
@@ -293,8 +300,10 @@
                     const state = history[prevIndex];
                     setPolyPoints(state.polyPoints);
                     setLipLinePoints(state.lipLinePoints || []);
-                    setLeftEyePoints(state.leftEyePoints);
-                    setRightEyePoints(state.rightEyePoints);
+                    setLeftEyePoints(state.leftEyePoints || []);
+                    setRightEyePoints(state.rightEyePoints || []);
+                    setLeftBrowPoints(state.leftBrowPoints || []);
+                    setRightBrowPoints(state.rightBrowPoints || []);
                     setHistoryIndex(prevIndex);
                 }
             };
@@ -305,8 +314,10 @@
                     const state = history[nextIndex];
                     setPolyPoints(state.polyPoints);
                     setLipLinePoints(state.lipLinePoints || []);
-                    setLeftEyePoints(state.leftEyePoints);
-                    setRightEyePoints(state.rightEyePoints);
+                    setLeftEyePoints(state.leftEyePoints || []);
+                    setRightEyePoints(state.rightEyePoints || []);
+                    setLeftBrowPoints(state.leftBrowPoints || []);
+                    setRightBrowPoints(state.rightBrowPoints || []);
                     setHistoryIndex(nextIndex);
                 }
             };
@@ -800,7 +811,7 @@
 
             const findClickedPolygon = (point) => {
                 // Check which polygon (if any) was clicked
-                // Returns {type: 'mouth'|'leftEye'|'rightEye'|'lipLine', points: array, pointIndex: number}
+                // Returns {type: 'mouth'|'leftEye'|'rightEye'|'leftBrow'|'rightBrow'|'lipLine', points: array, pointIndex: number}
 
                 const pointRadius = getHitRadius(20);
 
@@ -812,18 +823,28 @@
                 const lipLineIdx = lipLinePoints.findIndex(p => isNearPoint(p, point, pointRadius));
                 if (lipLineIdx !== -1) return { type: 'lipLine', points: lipLinePoints, pointIndex: lipLineIdx };
 
-                // Check left eye points (includes eyebrows)
+                // Check left eye points
                 const leftEyeIdx = leftEyePoints.findIndex(p => isNearPoint(p, point, pointRadius));
                 if (leftEyeIdx !== -1) return { type: 'leftEye', points: leftEyePoints, pointIndex: leftEyeIdx };
 
-                // Check right eye points (includes eyebrows)
+                // Check right eye points
                 const rightEyeIdx = rightEyePoints.findIndex(p => isNearPoint(p, point, pointRadius));
                 if (rightEyeIdx !== -1) return { type: 'rightEye', points: rightEyePoints, pointIndex: rightEyeIdx };
+
+                // Check left eyebrow points
+                const leftBrowIdx = leftBrowPoints.findIndex(p => isNearPoint(p, point, pointRadius));
+                if (leftBrowIdx !== -1) return { type: 'leftBrow', points: leftBrowPoints, pointIndex: leftBrowIdx };
+
+                // Check right eyebrow points
+                const rightBrowIdx = rightBrowPoints.findIndex(p => isNearPoint(p, point, pointRadius));
+                if (rightBrowIdx !== -1) return { type: 'rightBrow', points: rightBrowPoints, pointIndex: rightBrowIdx };
 
                 // Check if inside polygons (for dragging whole polygon)
                 if (polyPoints.length > 2 && pointInPoly(point, polyPoints)) return { type: 'mouth', points: polyPoints, pointIndex: -1 };
                 if (leftEyePoints.length > 2 && pointInPoly(point, leftEyePoints)) return { type: 'leftEye', points: leftEyePoints, pointIndex: -1 };
                 if (rightEyePoints.length > 2 && pointInPoly(point, rightEyePoints)) return { type: 'rightEye', points: rightEyePoints, pointIndex: -1 };
+                if (leftBrowPoints.length > 2 && pointInPoly(point, leftBrowPoints)) return { type: 'leftBrow', points: leftBrowPoints, pointIndex: -1 };
+                if (rightBrowPoints.length > 2 && pointInPoly(point, rightBrowPoints)) return { type: 'rightBrow', points: rightBrowPoints, pointIndex: -1 };
 
                 return null;
             };
@@ -833,6 +854,8 @@
                 else if (type === 'lipLine') setLipLinePoints(newPoints);
                 else if (type === 'leftEye') setLeftEyePoints(newPoints);
                 else if (type === 'rightEye') setRightEyePoints(newPoints);
+                else if (type === 'leftBrow') setLeftBrowPoints(newPoints);
+                else if (type === 'rightBrow') setRightBrowPoints(newPoints);
             };
 
             const handleMouseDown = (e) => {
@@ -848,12 +871,8 @@
                     const shapePoints = generateBasicShape(manualDrawFeature, m.x, m.y, cw, ch);
 
                     if (shapePoints.length > 0) {
-                        // Map feature to correct polygon type
-                        let targetType = manualDrawFeature;
-                        if (manualDrawFeature === 'leftBrow') targetType = 'leftEye';
-                        if (manualDrawFeature === 'rightBrow') targetType = 'rightEye';
-
-                        updatePolygon(targetType, shapePoints);
+                        // Use feature name directly as polygon type
+                        updatePolygon(manualDrawFeature, shapePoints);
 
                         // Generate lip line if placing mouth
                         if (manualDrawFeature === 'mouth') {
@@ -1033,7 +1052,14 @@
                 } else {
                     // Check if near edge for adding points (increased radius for touch)
                     const edgeRadius = getHitRadius(15);
-                    for (const {poly} of [{poly: polyPoints}, {poly: lipLinePoints}, {poly: leftEyePoints}, {poly: rightEyePoints}]) {
+                    for (const {poly} of [
+                        {poly: polyPoints},
+                        {poly: lipLinePoints},
+                        {poly: leftEyePoints},
+                        {poly: rightEyePoints},
+                        {poly: leftBrowPoints},
+                        {poly: rightBrowPoints}
+                    ]) {
                         for (let i = 0; i < poly.length; i++) {
                             const p1 = poly[i];
                             const p2 = poly[(i + 1) % poly.length];
@@ -1138,7 +1164,14 @@
 
                 // Check all polygons for adding points on edges (zoom-adjusted radius)
                 const edgeRadius = getHitRadius(15);
-                for (const {type, points} of [{type: 'mouth', points: polyPoints}, {type: 'lipLine', points: lipLinePoints}, {type: 'leftEye', points: leftEyePoints}, {type: 'rightEye', points: rightEyePoints}]) {
+                for (const {type, points} of [
+                    {type: 'mouth', points: polyPoints},
+                    {type: 'lipLine', points: lipLinePoints},
+                    {type: 'leftEye', points: leftEyePoints},
+                    {type: 'rightEye', points: rightEyePoints},
+                    {type: 'leftBrow', points: leftBrowPoints},
+                    {type: 'rightBrow', points: rightBrowPoints}
+                ]) {
                     for (let i = 0; i < points.length; i++) {
                         const p1 = points[i];
                         const p2 = points[(i + 1) % points.length];
@@ -2255,15 +2288,17 @@
                         setPolyPoints(expanded);
                         setLipSplit(0.5);
 
-                        // Eyes (combined with eyebrows for full expression control)
+                        // Eyes (separate polygons)
                         const leftEye = detection.landmarks.getLeftEye().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
                         const rightEye = detection.landmarks.getRightEye().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
+                        setLeftEyePoints(leftEye);
+                        setRightEyePoints(rightEye);
+
+                        // Eyebrows (separate polygons)
                         const leftEyebrow = detection.landmarks.getLeftEyeBrow().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
                         const rightEyebrow = detection.landmarks.getRightEyeBrow().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
-
-                        // Combine eyebrow points with eye points (eyebrows are important for expressions)
-                        setLeftEyePoints([...leftEyebrow, ...leftEye]);
-                        setRightEyePoints([...rightEyebrow, ...rightEye]);
+                        setLeftBrowPoints(leftEyebrow);
+                        setRightBrowPoints(rightEyebrow);
 
                         // Generate initial lip line
                         const finalMouthBounds = getBounds(expanded);
@@ -2377,7 +2412,7 @@
                     }
                 }
 
-                // Mouth
+                // Mouth (anchor points increased 25%: 4 -> 5)
                 if (enableMouth && polyPoints.length > 0) {
                     ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2;
                     ctx.beginPath();
@@ -2393,12 +2428,12 @@
                     polyPoints.forEach(p => {
                         const pt = transformPt(p);
                         ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                        ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
                         ctx.fill();
                     });
                 }
 
-                // Eyes overlay for editing
+                // Eyes overlay for editing (anchor points increased 25%: 3 -> 4)
                 const drawEyeOverlay = (eyePoints) => {
                     if (eyePoints.length > 0) {
                         ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2;
@@ -2415,7 +2450,7 @@
                         eyePoints.forEach(p => {
                             const pt = transformPt(p);
                             ctx.beginPath();
-                            ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
+                            ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
                             ctx.fill();
                         });
                     }
@@ -2425,7 +2460,32 @@
                     drawEyeOverlay(rightEyePoints);
                 }
 
-                // Editable lip line (follows the split between upper and lower lips)
+                // Eyebrows overlay (separate from eyes, yellow/orange color)
+                const drawBrowOverlay = (browPoints) => {
+                    if (browPoints.length > 0) {
+                        ctx.strokeStyle = '#ffaa00'; ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        const firstPt = transformPt(browPoints[0]);
+                        ctx.moveTo(firstPt.x, firstPt.y);
+                        for (let i = 1; i < browPoints.length; i++) {
+                            const pt = transformPt(browPoints[i]);
+                            ctx.lineTo(pt.x, pt.y);
+                        }
+                        ctx.closePath(); ctx.stroke();
+
+                        ctx.fillStyle = '#fff';
+                        browPoints.forEach(p => {
+                            const pt = transformPt(p);
+                            ctx.beginPath();
+                            ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                            ctx.fill();
+                        });
+                    }
+                };
+                drawBrowOverlay(leftBrowPoints);
+                drawBrowOverlay(rightBrowPoints);
+
+                // Editable lip line (anchor points increased 25%: 4 -> 5)
                 if (lipLinePoints.length > 0) {
                     ctx.strokeStyle = '#00ff99';
                     ctx.lineWidth = 2;
@@ -2442,7 +2502,7 @@
                     lipLinePoints.forEach(p => {
                         const pt = transformPt(p);
                         ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                        ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
                         ctx.fill();
                     });
                 }
@@ -2463,7 +2523,7 @@
                 }
             };
 
-            const resetAll = () => { stopEverything(); setImage(null); setRecordedVideo(null); setPolyPoints([]); setLipLinePoints([]); setLeftEyePoints([]); setRightEyePoints([]); };
+            const resetAll = () => { stopEverything(); setImage(null); setRecordedVideo(null); setPolyPoints([]); setLipLinePoints([]); setLeftEyePoints([]); setRightEyePoints([]); setLeftBrowPoints([]); setRightBrowPoints([]); };
 
             return (
                 <div className="layout">
