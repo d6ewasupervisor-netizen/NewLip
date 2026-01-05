@@ -688,6 +688,31 @@
                 return inside;
             };
 
+            // Helper function to transform points from image space to canvas space when zoomed
+            // Defined at component level so it can be used in event handlers
+            const transformPointToCanvas = (p, zoomed, scale, offset) => {
+                if (!zoomed || scale <= 1.0 || !canvasRef.current) return p;
+
+                const imageWidth = canvasRef.current.width;
+                const imageHeight = canvasRef.current.height;
+                const viewportWidth = imageWidth / scale;
+                const viewportHeight = imageHeight / scale;
+
+                const canvasX = ((p.x - offset.x) / viewportWidth) * imageWidth;
+                const canvasY = ((p.y - offset.y) / viewportHeight) * imageHeight;
+
+                return { x: canvasX, y: canvasY };
+            };
+
+            // Get hit detection radius adjusted for zoom level
+            // When zoomed in, we need larger hit areas in image space since the view is magnified
+            const getHitRadius = (baseRadius) => {
+                if (isZoomed && zoomScale > 1.0) {
+                    return baseRadius / zoomScale;
+                }
+                return baseRadius;
+            };
+
             const generateLipLine = (mouthBounds) => {
                 if (!mouthBounds || !polyPoints.length) return [];
 
@@ -721,20 +746,22 @@
                 // Check which polygon (if any) was clicked
                 // Returns {type: 'mouth'|'leftEye'|'rightEye'|'lipLine', points: array, pointIndex: number}
 
+                const pointRadius = getHitRadius(20);
+
                 // Check mouth points
-                const mouthIdx = polyPoints.findIndex(p => isNearPoint(p, point));
+                const mouthIdx = polyPoints.findIndex(p => isNearPoint(p, point, pointRadius));
                 if (mouthIdx !== -1) return { type: 'mouth', points: polyPoints, pointIndex: mouthIdx };
 
                 // Check lip line points
-                const lipLineIdx = lipLinePoints.findIndex(p => isNearPoint(p, point));
+                const lipLineIdx = lipLinePoints.findIndex(p => isNearPoint(p, point, pointRadius));
                 if (lipLineIdx !== -1) return { type: 'lipLine', points: lipLinePoints, pointIndex: lipLineIdx };
 
                 // Check left eye points (includes eyebrows)
-                const leftEyeIdx = leftEyePoints.findIndex(p => isNearPoint(p, point));
+                const leftEyeIdx = leftEyePoints.findIndex(p => isNearPoint(p, point, pointRadius));
                 if (leftEyeIdx !== -1) return { type: 'leftEye', points: leftEyePoints, pointIndex: leftEyeIdx };
 
                 // Check right eye points (includes eyebrows)
-                const rightEyeIdx = rightEyePoints.findIndex(p => isNearPoint(p, point));
+                const rightEyeIdx = rightEyePoints.findIndex(p => isNearPoint(p, point, pointRadius));
                 if (rightEyeIdx !== -1) return { type: 'rightEye', points: rightEyePoints, pointIndex: rightEyeIdx };
 
                 // Check if inside polygons (for dragging whole polygon)
@@ -760,7 +787,7 @@
                     const m = getCoords(e);
 
                     // Check if clicking near the first point to close the loop
-                    if (drawingPoints.length >= 3 && isNearPoint(m, drawingPoints[0], 15)) {
+                    if (drawingPoints.length >= 3 && isNearPoint(m, drawingPoints[0], getHitRadius(15))) {
                         // Close the loop - apply the points to the selected feature
                         const newPoints = [...drawingPoints];
                         updatePolygon(manualDrawFeature, newPoints);
@@ -892,8 +919,8 @@
                     // Draw preview line from last point to current mouse position
                     drawOverlay();
                     const ctx = canvasRef.current.getContext('2d');
-                    const lastPt = transformPointToCanvas(drawingPoints[drawingPoints.length - 1]);
-                    const currentPt = transformPointToCanvas(m);
+                    const lastPt = transformPointToCanvas(drawingPoints[drawingPoints.length - 1], isZoomed, zoomScale, panOffset);
+                    const currentPt = transformPointToCanvas(m, isZoomed, zoomScale, panOffset);
                     ctx.strokeStyle = '#00ff99';
                     ctx.lineWidth = 2;
                     ctx.setLineDash([6, 4]);
@@ -904,8 +931,8 @@
                     ctx.setLineDash([]);
 
                     // Highlight first point if near it (to indicate loop closure)
-                    if (drawingPoints.length >= 3 && isNearPoint(m, drawingPoints[0], 15)) {
-                        const firstPt = transformPointToCanvas(drawingPoints[0]);
+                    if (drawingPoints.length >= 3 && isNearPoint(m, drawingPoints[0], getHitRadius(15))) {
+                        const firstPt = transformPointToCanvas(drawingPoints[0], isZoomed, zoomScale, panOffset);
                         ctx.strokeStyle = '#00ff99';
                         ctx.lineWidth = 3;
                         ctx.beginPath();
@@ -952,11 +979,12 @@
                     else cursor = isDraggingPoly ? 'grabbing' : 'grab';
                 } else {
                     // Check if near edge for adding points (increased radius for touch)
+                    const edgeRadius = getHitRadius(15);
                     for (const {poly} of [{poly: polyPoints}, {poly: lipLinePoints}, {poly: leftEyePoints}, {poly: rightEyePoints}]) {
                         for (let i = 0; i < poly.length; i++) {
                             const p1 = poly[i];
                             const p2 = poly[(i + 1) % poly.length];
-                            if (distToSegment(m, p1, p2) < 15) cursor = 'copy';
+                            if (distToSegment(m, p1, p2) < edgeRadius) cursor = 'copy';
                         }
                     }
                 }
@@ -991,27 +1019,30 @@
                 if(isAnimating || !image) return;
                 const m = getCoords(e);
 
-                // Check all polygons for point removal
+                // Check all polygons for point removal (uses zoom-adjusted radius via findClickedPolygon)
                 const clicked = findClickedPolygon(m);
                 if (clicked && clicked.pointIndex !== -1) {
                     if (clicked.points.length > 3) {
                         const filtered = clicked.points.filter((_, i) => i !== clicked.pointIndex);
                         updatePolygon(clicked.type, filtered);
                         saveToHistory();
+                        drawOverlay();
                     }
                     return;
                 }
 
-                // Check all polygons for adding points on edges (increased radius for touch)
+                // Check all polygons for adding points on edges (zoom-adjusted radius)
+                const edgeRadius = getHitRadius(15);
                 for (const {type, points} of [{type: 'mouth', points: polyPoints}, {type: 'lipLine', points: lipLinePoints}, {type: 'leftEye', points: leftEyePoints}, {type: 'rightEye', points: rightEyePoints}]) {
                     for (let i = 0; i < points.length; i++) {
                         const p1 = points[i];
                         const p2 = points[(i + 1) % points.length];
-                        if (distToSegment(m, p1, p2) < 15) {
+                        if (distToSegment(m, p1, p2) < edgeRadius) {
                             const newPoints = [...points];
                             newPoints.splice(i + 1, 0, m);
                             updatePolygon(type, newPoints);
                             saveToHistory();
+                            drawOverlay();
                             return;
                         }
                     }
@@ -1936,75 +1967,132 @@
 
             const autoDetect = async () => {
                 setIsDetecting(true);
+                setStatus("Scanning for faces...");
+
                 try {
                     const srcCvs = canvasRef.current;
                     if (!srcCvs) return;
 
-                    // Downscale for faster detection, then map landmarks back up
-                    const maxSide = 640;
-                    const scale = Math.min(1, maxSide / Math.max(srcCvs.width, srcCvs.height));
-                    const detCvs = document.createElement("canvas");
-                    detCvs.width = Math.round(srcCvs.width * scale);
-                    detCvs.height = Math.round(srcCvs.height * scale);
+                    // Multiple detection configurations to try (more robust for various image sizes)
+                    // Start with larger input sizes and lower thresholds for better detection
+                    const detectionConfigs = [
+                        { inputSize: 512, scoreThreshold: 0.3, upscale: 1 },
+                        { inputSize: 416, scoreThreshold: 0.25, upscale: 1 },
+                        { inputSize: 320, scoreThreshold: 0.2, upscale: 1 },
+                        { inputSize: 224, scoreThreshold: 0.15, upscale: 1 },
+                        // For small faces, upscale the detection canvas
+                        { inputSize: 512, scoreThreshold: 0.2, upscale: 2 },
+                        { inputSize: 416, scoreThreshold: 0.15, upscale: 2 },
+                        // Even more aggressive upscaling for tiny faces
+                        { inputSize: 512, scoreThreshold: 0.1, upscale: 3 },
+                    ];
 
-                    const dctx = detCvs.getContext("2d", { willReadFrequently: true });
-                    dctx.drawImage(srcCvs, 0, 0, detCvs.width, detCvs.height);
+                    let detection = null;
+                    let usedScale = 1;
+                    let configIndex = 0;
 
-                    const opts = new faceapi.TinyFaceDetectorOptions({
-                        inputSize: 224,
-                        scoreThreshold: 0.4,
-                    });
+                    for (const config of detectionConfigs) {
+                        configIndex++;
+                        setStatus(`Scanning (attempt ${configIndex}/${detectionConfigs.length})...`);
 
-                    const detection = await faceapi
-                        .detectSingleFace(detCvs, opts)
-                        .withFaceLandmarks();
+                        // Calculate scale: may upscale for small images, cap to reasonable size
+                        const upscaleFactor = config.upscale;
+                        const maxDetectionSize = 1024;
+                        const upscaledWidth = srcCvs.width * upscaleFactor;
+                        const upscaledHeight = srcCvs.height * upscaleFactor;
+
+                        // Limit maximum size to avoid memory issues
+                        const finalScale = Math.min(
+                            upscaleFactor,
+                            maxDetectionSize / Math.max(srcCvs.width, srcCvs.height)
+                        );
+
+                        const detCvs = document.createElement("canvas");
+                        detCvs.width = Math.round(srcCvs.width * finalScale);
+                        detCvs.height = Math.round(srcCvs.height * finalScale);
+
+                        const dctx = detCvs.getContext("2d", { willReadFrequently: true });
+
+                        // Use better image smoothing for upscaling
+                        dctx.imageSmoothingEnabled = true;
+                        dctx.imageSmoothingQuality = 'high';
+                        dctx.drawImage(srcCvs, 0, 0, detCvs.width, detCvs.height);
+
+                        const opts = new faceapi.TinyFaceDetectorOptions({
+                            inputSize: config.inputSize,
+                            scoreThreshold: config.scoreThreshold,
+                        });
+
+                        try {
+                            detection = await faceapi
+                                .detectSingleFace(detCvs, opts)
+                                .withFaceLandmarks();
+
+                            if (detection) {
+                                usedScale = finalScale;
+                                console.log(`Face detected with config ${configIndex}: inputSize=${config.inputSize}, threshold=${config.scoreThreshold}, upscale=${config.upscale}`);
+                                break;
+                            }
+                        } catch (e) {
+                            console.warn(`Detection attempt ${configIndex} failed:`, e);
+                            continue;
+                        }
+                    }
 
                     if (detection) {
                         const mouth = detection.landmarks.getMouth();
 
                         // Outer mouth ring (first 12 points), mapped back to original canvas coords
-                        const outer = mouth.slice(0, 12).map((p) => ({ x: p.x / scale, y: p.y / scale }));
+                        const outer = mouth.slice(0, 12).map((p) => ({ x: p.x / usedScale, y: p.y / usedScale }));
 
                         const center = outer.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
                         center.x /= outer.length;
                         center.y /= outer.length;
 
+                        // Calculate expansion based on face size for better scaling
+                        const mouthBounds = getBounds(outer);
+                        const faceRelativeSize = Math.max(mouthBounds.width, mouthBounds.height) / Math.max(srcCvs.width, srcCvs.height);
+
+                        // Adjust expansion: smaller faces need less expansion
+                        const horizontalExpand = faceRelativeSize < 0.1 ? 1.25 : 1.4;
+                        const verticalExpand = faceRelativeSize < 0.1 ? 1.15 : 1.3;
+
                         const expanded = outer.map((p) => ({
-                            x: center.x + (p.x - center.x) * 1.4,
-                            y: center.y + (p.y - center.y) * 1.3,
+                            x: center.x + (p.x - center.x) * horizontalExpand,
+                            y: center.y + (p.y - center.y) * verticalExpand,
                         }));
 
                         // Depth "chin bag" scaled to mouth size
                         const b = getBounds(expanded);
-                        const chinDrop = Math.min(b.height * 0.25, 60);
+                        const chinDrop = Math.min(b.height * 0.25, Math.max(b.height * 0.15, 20));
                         for (let i = 6; i <= 10; i++) if (expanded[i]) expanded[i].y += chinDrop;
 
                         setPolyPoints(expanded);
                         setLipSplit(0.5);
 
                         // Eyes (combined with eyebrows for full expression control)
-                        const leftEye = detection.landmarks.getLeftEye().map(p => ({x: p.x / scale, y: p.y / scale}));
-                        const rightEye = detection.landmarks.getRightEye().map(p => ({x: p.x / scale, y: p.y / scale}));
-                        const leftEyebrow = detection.landmarks.getLeftEyeBrow().map(p => ({x: p.x / scale, y: p.y / scale}));
-                        const rightEyebrow = detection.landmarks.getRightEyeBrow().map(p => ({x: p.x / scale, y: p.y / scale}));
+                        const leftEye = detection.landmarks.getLeftEye().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
+                        const rightEye = detection.landmarks.getRightEye().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
+                        const leftEyebrow = detection.landmarks.getLeftEyeBrow().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
+                        const rightEyebrow = detection.landmarks.getRightEyeBrow().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
 
                         // Combine eyebrow points with eye points (eyebrows are important for expressions)
                         setLeftEyePoints([...leftEyebrow, ...leftEye]);
                         setRightEyePoints([...rightEyebrow, ...rightEye]);
 
                         // Generate initial lip line
-                        const mouthBounds = getBounds(expanded);
-                        setLipLinePoints(generateLipLine(mouthBounds));
+                        const finalMouthBounds = getBounds(expanded);
+                        setLipLinePoints(generateLipLine(finalMouthBounds));
 
                         saveToHistory();
                         drawOverlay();
                         setStatus("Detected face and eyes. Refine or animate!");
                     } else {
-                        setStatus("No face detected. Use Manual Mouth Box.");
+                        setStatus("No face detected. Try Manual Draw or use a clearer image.");
                     }
                 } catch (e) {
                     console.error(e);
-                    setStatus("Detect failed. Use Manual Mouth Box.");
+                    setStatus("Detection failed. Use Manual Draw.");
                 }
                 setIsDetecting(false);
             };
@@ -2014,20 +2102,8 @@
                 const cw = canvasRef.current.width;
                 const ch = canvasRef.current.height;
 
-                // Helper function to transform points from image space to canvas space when zoomed
-                const transformPointToCanvas = (p) => {
-                    if (!isZoomed || zoomScale <= 1.0) return p;
-
-                    const imageWidth = canvasRef.current.width;
-                    const imageHeight = canvasRef.current.height;
-                    const viewportWidth = imageWidth / zoomScale;
-                    const viewportHeight = imageHeight / zoomScale;
-
-                    const canvasX = ((p.x - panOffset.x) / viewportWidth) * imageWidth;
-                    const canvasY = ((p.y - panOffset.y) / viewportHeight) * imageHeight;
-
-                    return { x: canvasX, y: canvasY };
-                };
+                // Use component-level transformPointToCanvas with current zoom state
+                const transformPt = (p) => transformPointToCanvas(p, isZoomed, zoomScale, panOffset);
 
                 // Create a temporary canvas with the character image
                 const tempCanvas = document.createElement('canvas');
@@ -2120,17 +2196,17 @@
                 if (enableMouth && polyPoints.length > 0) {
                     ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2;
                     ctx.beginPath();
-                    const firstPt = transformPointToCanvas(polyPoints[0]);
+                    const firstPt = transformPt(polyPoints[0]);
                     ctx.moveTo(firstPt.x, firstPt.y);
                     for (let i = 1; i < polyPoints.length; i++) {
-                        const pt = transformPointToCanvas(polyPoints[i]);
+                        const pt = transformPt(polyPoints[i]);
                         ctx.lineTo(pt.x, pt.y);
                     }
                     ctx.closePath(); ctx.stroke();
 
                     ctx.fillStyle = '#fff';
                     polyPoints.forEach(p => {
-                        const pt = transformPointToCanvas(p);
+                        const pt = transformPt(p);
                         ctx.beginPath();
                         ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
                         ctx.fill();
@@ -2142,17 +2218,17 @@
                     if (eyePoints.length > 0) {
                         ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2;
                         ctx.beginPath();
-                        const firstPt = transformPointToCanvas(eyePoints[0]);
+                        const firstPt = transformPt(eyePoints[0]);
                         ctx.moveTo(firstPt.x, firstPt.y);
                         for (let i = 1; i < eyePoints.length; i++) {
-                            const pt = transformPointToCanvas(eyePoints[i]);
+                            const pt = transformPt(eyePoints[i]);
                             ctx.lineTo(pt.x, pt.y);
                         }
                         ctx.closePath(); ctx.stroke();
 
                         ctx.fillStyle = '#fff';
                         eyePoints.forEach(p => {
-                            const pt = transformPointToCanvas(p);
+                            const pt = transformPt(p);
                             ctx.beginPath();
                             ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
                             ctx.fill();
@@ -2170,7 +2246,7 @@
                     ctx.lineWidth = 2;
                     ctx.beginPath();
                     for (let i = 0; i < lipLinePoints.length; i++) {
-                        const pt = transformPointToCanvas(lipLinePoints[i]);
+                        const pt = transformPt(lipLinePoints[i]);
                         if (i === 0) ctx.moveTo(pt.x, pt.y);
                         else ctx.lineTo(pt.x, pt.y);
                     }
@@ -2179,7 +2255,7 @@
                     // Draw anchor points
                     ctx.fillStyle = '#00ff99';
                     lipLinePoints.forEach(p => {
-                        const pt = transformPointToCanvas(p);
+                        const pt = transformPt(p);
                         ctx.beginPath();
                         ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
                         ctx.fill();
@@ -2193,7 +2269,7 @@
                     ctx.lineWidth = 2;
                     ctx.beginPath();
                     for (let i = 0; i < drawingPoints.length; i++) {
-                        const pt = transformPointToCanvas(drawingPoints[i]);
+                        const pt = transformPt(drawingPoints[i]);
                         if (i === 0) ctx.moveTo(pt.x, pt.y);
                         else ctx.lineTo(pt.x, pt.y);
                     }
@@ -2202,7 +2278,7 @@
                     // Draw anchor points
                     ctx.fillStyle = '#ff9900';
                     drawingPoints.forEach(p => {
-                        const pt = transformPointToCanvas(p);
+                        const pt = transformPt(p);
                         ctx.beginPath();
                         ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
                         ctx.fill();
@@ -2219,8 +2295,8 @@
                     ctx.strokeStyle = '#ffae00';
                     ctx.lineWidth = 1;
                     // Transform the rectangle corners when zoomed
-                    const topLeft = transformPointToCanvas({ x: lx, y: baseSplitY - 10 });
-                    const bottomRight = transformPointToCanvas({ x: lx + lipW, y: baseSplitY + 10 });
+                    const topLeft = transformPt({ x: lx, y: baseSplitY - 10 });
+                    const bottomRight = transformPt({ x: lx + lipW, y: baseSplitY + 10 });
                     ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
                 }
             };
