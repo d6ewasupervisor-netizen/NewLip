@@ -706,10 +706,13 @@
 
                 let canvasX, canvasY;
 
-                // Handle touch events
+                // Handle touch events (check both touches and changedTouches for touch end events)
                 if (e.touches && e.touches.length > 0) {
                     canvasX = (e.touches[0].clientX - rect.left) * scaleX;
                     canvasY = (e.touches[0].clientY - rect.top) * scaleY;
+                } else if (e.changedTouches && e.changedTouches.length > 0) {
+                    canvasX = (e.changedTouches[0].clientX - rect.left) * scaleX;
+                    canvasY = (e.changedTouches[0].clientY - rect.top) * scaleY;
                 } else {
                     canvasX = (e.clientX - rect.left) * scaleX;
                     canvasY = (e.clientY - rect.top) * scaleY;
