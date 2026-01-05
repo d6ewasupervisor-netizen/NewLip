@@ -81,6 +81,9 @@
             const lastPinchDistRef = React.useRef(null);
             const pinchCenterRef = React.useRef(null);
 
+            // Double-tap detection for mobile
+            const lastTapRef = React.useRef(null);
+
             const [isDraggingPoly, setIsDraggingPoly] = React.useState(false);
             const polyDragStartRef = React.useRef(null);
             const polyDragOrigRef = React.useRef(null);
@@ -1034,6 +1037,8 @@
                     if (draggedEye === 'mouth') currentPoints = polyPoints;
                     else if (draggedEye === 'leftEye') currentPoints = leftEyePoints;
                     else if (draggedEye === 'rightEye') currentPoints = rightEyePoints;
+                    else if (draggedEye === 'leftBrow') currentPoints = leftBrowPoints;
+                    else if (draggedEye === 'rightBrow') currentPoints = rightBrowPoints;
 
                     if (currentPoints) {
                         const newPoints = [...currentPoints];
@@ -1279,6 +1284,30 @@
             const handleTouchEnd = (e) => {
                 if (!image) return;
                 e.preventDefault();
+
+                // Double-tap detection for mobile
+                if (e.changedTouches && e.changedTouches.length === 1) {
+                    const touch = e.changedTouches[0];
+                    const now = Date.now();
+                    const tapPos = { x: touch.clientX, y: touch.clientY };
+
+                    if (lastTapRef.current) {
+                        const timeDiff = now - lastTapRef.current.time;
+                        const dx = tapPos.x - lastTapRef.current.x;
+                        const dy = tapPos.y - lastTapRef.current.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+
+                        // Double-tap detected: within 300ms and 30px
+                        if (timeDiff < 300 && distance < 30) {
+                            lastTapRef.current = null; // Reset to avoid triple-tap
+                            handleDoubleClick(e);
+                            return;
+                        }
+                    }
+
+                    // Store this tap for next time
+                    lastTapRef.current = { x: tapPos.x, y: tapPos.y, time: now };
+                }
 
                 // Reset pinch state
                 lastPinchDistRef.current = null;
@@ -2428,7 +2457,7 @@
                     polyPoints.forEach(p => {
                         const pt = transformPt(p);
                         ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
+                        ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
                         ctx.fill();
                     });
                 }
@@ -2450,7 +2479,7 @@
                         eyePoints.forEach(p => {
                             const pt = transformPt(p);
                             ctx.beginPath();
-                            ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                            ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
                             ctx.fill();
                         });
                     }
@@ -2477,7 +2506,7 @@
                         browPoints.forEach(p => {
                             const pt = transformPt(p);
                             ctx.beginPath();
-                            ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                            ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
                             ctx.fill();
                         });
                     }
@@ -2502,7 +2531,7 @@
                     lipLinePoints.forEach(p => {
                         const pt = transformPt(p);
                         ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
+                        ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
                         ctx.fill();
                     });
                 }
