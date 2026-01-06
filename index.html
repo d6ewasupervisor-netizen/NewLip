@@ -116,6 +116,55 @@
             const [lipLinePoints, setLipLinePoints] = React.useState([]);
             const lipLinePointsRef = React.useRef([]);
 
+            // Companion Regions - areas that move with main facial components
+            const [mouthCompanionRegions, setMouthCompanionRegions] = React.useState({
+                chin: [], // Points defining chin region (moves down with mouth)
+                leftCheek: [], // Points defining left cheek region
+                rightCheek: [], // Points defining right cheek region
+                noseBottom: [] // Points defining bottom of nose region
+            });
+            const mouthCompanionRegionsRef = React.useRef({
+                chin: [],
+                leftCheek: [],
+                rightCheek: [],
+                noseBottom: []
+            });
+
+            const [eyeCompanionRegions, setEyeCompanionRegions] = React.useState({
+                leftEyeCorners: [], // Outer corners for squinting
+                rightEyeCorners: [], // Outer corners for squinting
+                leftUpperCheek: [], // Area below left eye
+                rightUpperCheek: [], // Area below right eye
+                noseBridge: [] // Area between eyes
+            });
+            const eyeCompanionRegionsRef = React.useRef({
+                leftEyeCorners: [],
+                rightEyeCorners: [],
+                leftUpperCheek: [],
+                rightUpperCheek: [],
+                noseBridge: []
+            });
+
+            const [browCompanionRegions, setBrowCompanionRegions] = React.useState({
+                leftForehead: [], // Forehead area above left brow
+                rightForehead: [], // Forehead area above right brow
+                leftEyelidUpper: [], // Upper eyelid affected by left brow
+                rightEyelidUpper: [] // Upper eyelid affected by right brow
+            });
+            const browCompanionRegionsRef = React.useRef({
+                leftForehead: [],
+                rightForehead: [],
+                leftEyelidUpper: [],
+                rightEyelidUpper: []
+            });
+
+            // Companion region settings
+            const [showCompanionRegions, setShowCompanionRegions] = React.useState(true);
+            const [mouthCompanionInfluence, setMouthCompanionInfluence] = React.useState(0.7); // 0-1 how much companions follow
+            const [eyeCompanionInfluence, setEyeCompanionInfluence] = React.useState(0.6);
+            const [browCompanionInfluence, setBrowCompanionInfluence] = React.useState(0.5);
+            const [editingCompanionRegion, setEditingCompanionRegion] = React.useState(null); // {component, region} e.g. {component: 'mouth', region: 'chin'}
+
             // Zoom/Magnification for fine-tuning
             const [isZoomed, setIsZoomed] = React.useState(false);
             const [zoomScale, setZoomScale] = React.useState(1.0); // Start at 1.0 (no zoom)
@@ -482,7 +531,10 @@
                     leftEyePoints: JSON.parse(JSON.stringify(leftEyePoints)),
                     rightEyePoints: JSON.parse(JSON.stringify(rightEyePoints)),
                     leftBrowPoints: JSON.parse(JSON.stringify(leftBrowPoints)),
-                    rightBrowPoints: JSON.parse(JSON.stringify(rightBrowPoints))
+                    rightBrowPoints: JSON.parse(JSON.stringify(rightBrowPoints)),
+                    mouthCompanionRegions: JSON.parse(JSON.stringify(mouthCompanionRegions)),
+                    eyeCompanionRegions: JSON.parse(JSON.stringify(eyeCompanionRegions)),
+                    browCompanionRegions: JSON.parse(JSON.stringify(browCompanionRegions))
                 };
 
                 // Truncate history if we're not at the end
@@ -515,6 +567,9 @@
                     setRightEyePoints(state.rightEyePoints || []);
                     setLeftBrowPoints(state.leftBrowPoints || []);
                     setRightBrowPoints(state.rightBrowPoints || []);
+                    if (state.mouthCompanionRegions) setMouthCompanionRegions(state.mouthCompanionRegions);
+                    if (state.eyeCompanionRegions) setEyeCompanionRegions(state.eyeCompanionRegions);
+                    if (state.browCompanionRegions) setBrowCompanionRegions(state.browCompanionRegions);
                     setHistoryIndex(prevIndex);
                 }
             };
@@ -529,6 +584,9 @@
                     setRightEyePoints(state.rightEyePoints || []);
                     setLeftBrowPoints(state.leftBrowPoints || []);
                     setRightBrowPoints(state.rightBrowPoints || []);
+                    if (state.mouthCompanionRegions) setMouthCompanionRegions(state.mouthCompanionRegions);
+                    if (state.eyeCompanionRegions) setEyeCompanionRegions(state.eyeCompanionRegions);
+                    if (state.browCompanionRegions) setBrowCompanionRegions(state.browCompanionRegions);
                     setHistoryIndex(nextIndex);
                 }
             };
@@ -723,6 +781,9 @@
             React.useEffect(() => { leftBrowPointsRef.current = leftBrowPoints; }, [leftBrowPoints]);
             React.useEffect(() => { rightBrowPointsRef.current = rightBrowPoints; }, [rightBrowPoints]);
             React.useEffect(() => { lipLinePointsRef.current = lipLinePoints; }, [lipLinePoints]);
+            React.useEffect(() => { mouthCompanionRegionsRef.current = mouthCompanionRegions; }, [mouthCompanionRegions]);
+            React.useEffect(() => { eyeCompanionRegionsRef.current = eyeCompanionRegions; }, [eyeCompanionRegions]);
+            React.useEffect(() => { browCompanionRegionsRef.current = browCompanionRegions; }, [browCompanionRegions]);
 
             // Keyboard event listeners for modifier keys
             React.useEffect(() => {
@@ -2116,6 +2177,96 @@
                 ctx.putImageData(currentImg, bounds.x, bounds.y);
             };
 
+            // Process companion regions for realistic movement
+            const processCompanionRegion = (regionPoints, displacement, influence, ctx, canvasWidth, canvasHeight) => {
+                if (!regionPoints || regionPoints.length < 3 || !originalImageDataRef.current) return;
+
+                const bounds = getBounds(regionPoints);
+                if (bounds.width < 1 || bounds.height < 1) return;
+
+                // Expand bounds slightly for smooth edges
+                const padding = 5;
+                const expandedBounds = {
+                    x: Math.max(0, bounds.x - padding),
+                    y: Math.max(0, bounds.y - padding),
+                    width: Math.min(canvasWidth - bounds.x + padding, bounds.width + padding * 2),
+                    height: Math.min(canvasHeight - bounds.y + padding, bounds.height + padding * 2)
+                };
+
+                try {
+                    const currentImg = ctx.getImageData(expandedBounds.x, expandedBounds.y, expandedBounds.width, expandedBounds.height);
+                    const dst = currentImg.data;
+
+                    // Create backup of current region
+                    const backup = new Uint8ClampedArray(dst);
+
+                    const w = expandedBounds.width;
+                    const h = expandedBounds.height;
+
+                    // Create mask for region polygon
+                    const isPointInPolygon = (x, y, polygon) => {
+                        let inside = false;
+                        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                            const xi = polygon[i].x - expandedBounds.x;
+                            const yi = polygon[i].y - expandedBounds.y;
+                            const xj = polygon[j].x - expandedBounds.x;
+                            const yj = polygon[j].y - expandedBounds.y;
+
+                            const intersect = ((yi > y) !== (yj > y)) &&
+                                            (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                            if (intersect) inside = !inside;
+                        }
+                        return inside;
+                    };
+
+                    // Apply vertical displacement with influence scaling
+                    const scaledDisplacement = displacement * influence;
+
+                    for (let y = 0; y < h; y++) {
+                        for (let x = 0; x < w; x++) {
+                            const worldX = expandedBounds.x + x;
+                            const worldY = expandedBounds.y + y;
+
+                            if (!isPointInPolygon(worldX, worldY, regionPoints)) continue;
+
+                            const idx = (y * w + x) * 4;
+
+                            // Calculate source Y with displacement
+                            let srcY = y - scaledDisplacement;
+
+                            // Calculate distance from region center for falloff
+                            const centerX = bounds.x + bounds.width / 2 - expandedBounds.x;
+                            const centerY = bounds.y + bounds.height / 2 - expandedBounds.y;
+                            const dx = (x - centerX) / (bounds.width / 2);
+                            const dy = (y - centerY) / (bounds.height / 2);
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            const falloff = Math.max(0, 1 - dist * 0.5); // Smooth falloff from center
+
+                            // Apply displacement with falloff
+                            srcY = y - (scaledDisplacement * falloff);
+
+                            // Bounds check and sample
+                            if (srcY >= 0 && srcY < h - 1) {
+                                const y0 = Math.floor(srcY);
+                                const t = srcY - y0;
+
+                                const i0 = (y0 * w + x) * 4;
+                                const i1 = ((y0 + 1) * w + x) * 4;
+
+                                // Linear interpolation
+                                dst[idx] = Math.round(backup[i0] * (1 - t) + backup[i1] * t);
+                                dst[idx + 1] = Math.round(backup[i0 + 1] * (1 - t) + backup[i1 + 1] * t);
+                                dst[idx + 2] = Math.round(backup[i0 + 2] * (1 - t) + backup[i1 + 2] * t);
+                            }
+                        }
+                    }
+
+                    ctx.putImageData(currentImg, expandedBounds.x, expandedBounds.y);
+                } catch (e) {
+                    // Silently skip regions that can't be processed
+                }
+            };
+
             const startAnimation = async () => {
                 if (polyPoints.length < 3) {
                     setStatus("Please detect or draw mouth points first!");
@@ -2396,6 +2547,50 @@
                     // Only process mouth if enabled
                     if (enableMouth) {
                         processFrame(openPixels, ctx, bounds, mouthBuffer, maskData);
+
+                        // Process mouth companion regions with scaled displacement
+                        if (mouthCompanionInfluence > 0) {
+                            const mouthDisplacement = openPixels * 0.3; // Proportional to mouth opening
+
+                            // Chin moves down with mouth opening
+                            processCompanionRegion(
+                                mouthCompanionRegionsRef.current.chin,
+                                mouthDisplacement,
+                                mouthCompanionInfluence,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+
+                            // Cheeks move outward/upward with mouth
+                            processCompanionRegion(
+                                mouthCompanionRegionsRef.current.leftCheek,
+                                -mouthDisplacement * 0.4, // Slight upward movement
+                                mouthCompanionInfluence * 0.7,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+
+                            processCompanionRegion(
+                                mouthCompanionRegionsRef.current.rightCheek,
+                                -mouthDisplacement * 0.4,
+                                mouthCompanionInfluence * 0.7,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+
+                            // Bottom of nose subtle movement
+                            processCompanionRegion(
+                                mouthCompanionRegionsRef.current.noseBottom,
+                                -mouthDisplacement * 0.2, // Very subtle upward
+                                mouthCompanionInfluence * 0.5,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+                        }
                     }
 
                     // Eye animation - only if enabled
@@ -2471,6 +2666,102 @@
 
                         if (leftEyePoints.length > 2) processEyeFrame(leftEyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY);
                         if (rightEyePoints.length > 2) processEyeFrame(rightEyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY);
+
+                        // Process eye companion regions
+                        if (eyeCompanionInfluence > 0) {
+                            const blinkAmount = (1 - Math.min(leftEyeOpen, rightEyeOpen)) * 10; // Displacement for blinking
+
+                            // Eye corners squint when blinking
+                            processCompanionRegion(
+                                eyeCompanionRegionsRef.current.leftEyeCorners,
+                                blinkAmount * 0.5,
+                                eyeCompanionInfluence * 0.8,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+
+                            processCompanionRegion(
+                                eyeCompanionRegionsRef.current.rightEyeCorners,
+                                blinkAmount * 0.5,
+                                eyeCompanionInfluence * 0.8,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+
+                            // Upper cheeks lift slightly with eye movement
+                            processCompanionRegion(
+                                eyeCompanionRegionsRef.current.leftUpperCheek,
+                                -blinkAmount * 0.3,
+                                eyeCompanionInfluence * 0.6,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+
+                            processCompanionRegion(
+                                eyeCompanionRegionsRef.current.rightUpperCheek,
+                                -blinkAmount * 0.3,
+                                eyeCompanionInfluence * 0.6,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+
+                            // Nose bridge subtle movement
+                            processCompanionRegion(
+                                eyeCompanionRegionsRef.current.noseBridge,
+                                blinkAmount * 0.15,
+                                eyeCompanionInfluence * 0.4,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+                        }
+
+                        // Process eyebrow companion regions
+                        if (browCompanionInfluence > 0 && currentEyeState === 'blink') {
+                            const browDrop = 5; // Eyebrows drop during blink
+
+                            // Forehead follows brow movement
+                            processCompanionRegion(
+                                browCompanionRegionsRef.current.leftForehead,
+                                browDrop,
+                                browCompanionInfluence * 0.5,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+
+                            processCompanionRegion(
+                                browCompanionRegionsRef.current.rightForehead,
+                                browDrop,
+                                browCompanionInfluence * 0.5,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+
+                            // Upper eyelid affected by brow
+                            processCompanionRegion(
+                                browCompanionRegionsRef.current.leftEyelidUpper,
+                                browDrop * 0.6,
+                                browCompanionInfluence * 0.7,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+
+                            processCompanionRegion(
+                                browCompanionRegionsRef.current.rightEyelidUpper,
+                                browDrop * 0.6,
+                                browCompanionInfluence * 0.7,
+                                ctx,
+                                canvasRef.current.width,
+                                canvasRef.current.height
+                            );
+                        }
                     }
 
                     animationFrameRef.current = requestAnimationFrame(loop);
@@ -2691,6 +2982,132 @@
                         const rightEyebrow = detection.landmarks.getRightEyeBrow().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
                         setLeftBrowPoints(leftEyebrow);
                         setRightBrowPoints(rightEyebrow);
+
+                        // Generate companion regions for realistic animation
+                        const nose = detection.landmarks.getNose().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
+                        const jawOutline = detection.landmarks.getJawOutline().map(p => ({x: p.x / usedScale, y: p.y / usedScale}));
+
+                        // Mouth companion regions
+                        const mouthBounds = getBounds(expanded);
+                        const mouthCenterX = (mouthBounds.x + mouthBounds.width / 2);
+                        const mouthCenterY = (mouthBounds.y + mouthBounds.height / 2);
+
+                        // Chin region (lower jaw that moves down with mouth)
+                        const chinRegion = [];
+                        for (let i = 5; i <= 11; i++) {
+                            if (jawOutline[i]) {
+                                chinRegion.push(jawOutline[i]);
+                            }
+                        }
+
+                        // Cheek regions (sides of face that move with mouth)
+                        const leftCheekRegion = [
+                            expanded[0], // Left corner of mouth
+                            {x: expanded[0].x - mouthBounds.width * 0.3, y: expanded[0].y},
+                            {x: expanded[0].x - mouthBounds.width * 0.3, y: expanded[0].y - mouthBounds.height * 0.5},
+                            {x: expanded[1].x, y: expanded[1].y - mouthBounds.height * 0.3}
+                        ];
+
+                        const rightCheekRegion = [
+                            expanded[6], // Right corner of mouth
+                            {x: expanded[6].x + mouthBounds.width * 0.3, y: expanded[6].y},
+                            {x: expanded[6].x + mouthBounds.width * 0.3, y: expanded[6].y - mouthBounds.height * 0.5},
+                            {x: expanded[5].x, y: expanded[5].y - mouthBounds.height * 0.3}
+                        ];
+
+                        // Bottom of nose region (subtle movement with mouth)
+                        const noseBottomRegion = nose.slice(3, 6); // Bottom part of nose
+
+                        setMouthCompanionRegions({
+                            chin: chinRegion,
+                            leftCheek: leftCheekRegion,
+                            rightCheek: rightCheekRegion,
+                            noseBottom: noseBottomRegion
+                        });
+
+                        // Eye companion regions
+                        const leftEyeBounds = getBounds(leftEye);
+                        const rightEyeBounds = getBounds(rightEye);
+
+                        // Eye corners for squinting
+                        const leftEyeCorners = [
+                            leftEye[0], // Outer corner
+                            {x: leftEye[0].x - 5, y: leftEye[0].y - 5},
+                            {x: leftEye[0].x - 5, y: leftEye[0].y + 5}
+                        ];
+
+                        const rightEyeCorners = [
+                            rightEye[3], // Outer corner
+                            {x: rightEye[3].x + 5, y: rightEye[3].y - 5},
+                            {x: rightEye[3].x + 5, y: rightEye[3].y + 5}
+                        ];
+
+                        // Upper cheek regions (below eyes, affected by blinking)
+                        const leftUpperCheek = [
+                            leftEye[4], // Bottom of left eye
+                            leftEye[5],
+                            {x: leftEyeBounds.x + leftEyeBounds.width, y: leftEyeBounds.y + leftEyeBounds.height + 10},
+                            {x: leftEyeBounds.x, y: leftEyeBounds.y + leftEyeBounds.height + 10}
+                        ];
+
+                        const rightUpperCheek = [
+                            rightEye[4], // Bottom of right eye
+                            rightEye[5],
+                            {x: rightEyeBounds.x + rightEyeBounds.width, y: rightEyeBounds.y + rightEyeBounds.height + 10},
+                            {x: rightEyeBounds.x, y: rightEyeBounds.y + rightEyeBounds.height + 10}
+                        ];
+
+                        // Nose bridge (area between eyes)
+                        const noseBridgeRegion = nose.slice(0, 3); // Top part of nose
+
+                        setEyeCompanionRegions({
+                            leftEyeCorners: leftEyeCorners,
+                            rightEyeCorners: rightEyeCorners,
+                            leftUpperCheek: leftUpperCheek,
+                            rightUpperCheek: rightUpperCheek,
+                            noseBridge: noseBridgeRegion
+                        });
+
+                        // Brow companion regions
+                        const leftBrowBounds = getBounds(leftEyebrow);
+                        const rightBrowBounds = getBounds(rightEyebrow);
+
+                        // Forehead regions (move with eyebrows)
+                        const leftForeheadRegion = [
+                            leftEyebrow[0],
+                            leftEyebrow[4],
+                            {x: leftBrowBounds.x + leftBrowBounds.width, y: leftBrowBounds.y - 20},
+                            {x: leftBrowBounds.x, y: leftBrowBounds.y - 20}
+                        ];
+
+                        const rightForeheadRegion = [
+                            rightEyebrow[0],
+                            rightEyebrow[4],
+                            {x: rightBrowBounds.x + rightBrowBounds.width, y: rightBrowBounds.y - 20},
+                            {x: rightBrowBounds.x, y: rightBrowBounds.y - 20}
+                        ];
+
+                        // Upper eyelid regions (affected by brow movement)
+                        const leftEyelidUpper = [
+                            leftEye[1],
+                            leftEye[2],
+                            leftEyebrow[2],
+                            leftEyebrow[1]
+                        ];
+
+                        const rightEyelidUpper = [
+                            rightEye[1],
+                            rightEye[2],
+                            rightEyebrow[2],
+                            rightEyebrow[1]
+                        ];
+
+                        setBrowCompanionRegions({
+                            leftForehead: leftForeheadRegion,
+                            rightForehead: rightForeheadRegion,
+                            leftEyelidUpper: leftEyelidUpper,
+                            rightEyelidUpper: rightEyelidUpper
+                        });
 
                         // Generate initial lip line
                         const finalMouthBounds = getBounds(expanded);
@@ -2916,6 +3333,71 @@
                 drawBrowOverlay(leftBrowPointsRef.current, 'leftBrow');
                 drawBrowOverlay(rightBrowPointsRef.current, 'rightBrow');
 
+                // Companion regions visualization
+                if (showCompanionRegions) {
+                    const drawCompanionRegion = (points, color, label) => {
+                        if (points && points.length > 0) {
+                            // Semi-transparent fill
+                            ctx.fillStyle = color.replace('rgb', 'rgba').replace(')', ', 0.15)');
+                            ctx.strokeStyle = color;
+                            ctx.lineWidth = 1.5;
+                            ctx.setLineDash([5, 5]);
+
+                            ctx.beginPath();
+                            const firstPt = transformPt(points[0]);
+                            ctx.moveTo(firstPt.x, firstPt.y);
+                            for (let i = 1; i < points.length; i++) {
+                                const pt = transformPt(points[i]);
+                                ctx.lineTo(pt.x, pt.y);
+                            }
+                            ctx.closePath();
+                            ctx.fill();
+                            ctx.stroke();
+
+                            ctx.setLineDash([]); // Reset line dash
+
+                            // Draw label at center of region
+                            if (label && points.length > 2) {
+                                const center = points.reduce((acc, p) => ({
+                                    x: acc.x + p.x / points.length,
+                                    y: acc.y + p.y / points.length
+                                }), {x: 0, y: 0});
+                                const centerPt = transformPt(center);
+
+                                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                                ctx.font = '10px sans-serif';
+                                const textWidth = ctx.measureText(label).width;
+                                ctx.fillRect(centerPt.x - textWidth/2 - 3, centerPt.y - 8, textWidth + 6, 14);
+                                ctx.fillStyle = color;
+                                ctx.fillText(label, centerPt.x - textWidth/2, centerPt.y + 3);
+                            }
+                        }
+                    };
+
+                    // Mouth companion regions (cyan shades)
+                    if (enableMouth && polyPointsRef.current.length > 0) {
+                        drawCompanionRegion(mouthCompanionRegionsRef.current.chin, 'rgb(100, 200, 255)', 'chin');
+                        drawCompanionRegion(mouthCompanionRegionsRef.current.leftCheek, 'rgb(150, 220, 255)', 'L cheek');
+                        drawCompanionRegion(mouthCompanionRegionsRef.current.rightCheek, 'rgb(150, 220, 255)', 'R cheek');
+                        drawCompanionRegion(mouthCompanionRegionsRef.current.noseBottom, 'rgb(180, 230, 255)', 'nose');
+                    }
+
+                    // Eye companion regions (green shades)
+                    if (enableEyes) {
+                        drawCompanionRegion(eyeCompanionRegionsRef.current.leftEyeCorners, 'rgb(100, 255, 150)', 'L corner');
+                        drawCompanionRegion(eyeCompanionRegionsRef.current.rightEyeCorners, 'rgb(100, 255, 150)', 'R corner');
+                        drawCompanionRegion(eyeCompanionRegionsRef.current.leftUpperCheek, 'rgb(150, 255, 180)', 'L u-cheek');
+                        drawCompanionRegion(eyeCompanionRegionsRef.current.rightUpperCheek, 'rgb(150, 255, 180)', 'R u-cheek');
+                        drawCompanionRegion(eyeCompanionRegionsRef.current.noseBridge, 'rgb(180, 255, 200)', 'bridge');
+                    }
+
+                    // Brow companion regions (orange shades)
+                    drawCompanionRegion(browCompanionRegionsRef.current.leftForehead, 'rgb(255, 180, 100)', 'L forehead');
+                    drawCompanionRegion(browCompanionRegionsRef.current.rightForehead, 'rgb(255, 180, 100)', 'R forehead');
+                    drawCompanionRegion(browCompanionRegionsRef.current.leftEyelidUpper, 'rgb(255, 200, 130)', 'L eyelid');
+                    drawCompanionRegion(browCompanionRegionsRef.current.rightEyelidUpper, 'rgb(255, 200, 130)', 'R eyelid');
+                }
+
                 // Editable lip line (anchor points increased 25%: 4 -> 5)
                 if (lipLinePointsRef.current.length > 0) {
                     ctx.strokeStyle = '#00ff99';
@@ -3048,7 +3530,20 @@
                 }
             };
 
-            const resetAll = () => { stopEverything(); setImage(null); setRecordedVideo(null); setPolyPoints([]); setLipLinePoints([]); setLeftEyePoints([]); setRightEyePoints([]); setLeftBrowPoints([]); setRightBrowPoints([]); };
+            const resetAll = () => {
+                stopEverything();
+                setImage(null);
+                setRecordedVideo(null);
+                setPolyPoints([]);
+                setLipLinePoints([]);
+                setLeftEyePoints([]);
+                setRightEyePoints([]);
+                setLeftBrowPoints([]);
+                setRightBrowPoints([]);
+                setMouthCompanionRegions({chin: [], leftCheek: [], rightCheek: [], noseBottom: []});
+                setEyeCompanionRegions({leftEyeCorners: [], rightEyeCorners: [], leftUpperCheek: [], rightUpperCheek: [], noseBridge: []});
+                setBrowCompanionRegions({leftForehead: [], rightForehead: [], leftEyelidUpper: [], rightEyelidUpper: []});
+            };
 
             return (
                 <div className="layout">
@@ -3174,6 +3669,76 @@
                                             onChange={e => { setBgRemovalEdge(Number(e.target.value)); removeBackground(); }}
                                         />
                                         <span style={{fontSize: '0.7rem', color: '#888'}}>{bgRemovalEdge.toFixed(2)}</span>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="panel">
+                            <h3>Companion Regions</h3>
+                            <p style={{fontSize: '0.75rem', color: '#888', marginBottom: 12}}>
+                                Areas that move naturally with facial features (chin with mouth, cheeks with eyes, etc.)
+                            </p>
+
+                            <div className="btn-row">
+                                <button
+                                    className={`btn ${showCompanionRegions ? 'btn-primary' : ''}`}
+                                    onClick={() => {
+                                        setShowCompanionRegions(!showCompanionRegions);
+                                        drawOverlay();
+                                    }}
+                                    style={{flex: 1}}
+                                >
+                                    {showCompanionRegions ? 'Hide Regions' : 'Show Regions'}
+                                </button>
+                            </div>
+
+                            {showCompanionRegions && (
+                                <>
+                                    <h3 style={{marginTop: 15, fontSize: '0.85rem', color: '#aaa'}}>Movement Influence</h3>
+
+                                    <div className="slider-row">
+                                        <label>Mouth</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="1"
+                                            step="0.05"
+                                            value={mouthCompanionInfluence}
+                                            onChange={e => setMouthCompanionInfluence(Number(e.target.value))}
+                                        />
+                                        <span style={{fontSize: '0.7rem', color: '#888', minWidth: 35}}>{Math.round(mouthCompanionInfluence * 100)}%</span>
+                                    </div>
+
+                                    <div className="slider-row">
+                                        <label>Eyes</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="1"
+                                            step="0.05"
+                                            value={eyeCompanionInfluence}
+                                            onChange={e => setEyeCompanionInfluence(Number(e.target.value))}
+                                        />
+                                        <span style={{fontSize: '0.7rem', color: '#888', minWidth: 35}}>{Math.round(eyeCompanionInfluence * 100)}%</span>
+                                    </div>
+
+                                    <div className="slider-row">
+                                        <label>Eyebrows</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="1"
+                                            step="0.05"
+                                            value={browCompanionInfluence}
+                                            onChange={e => setBrowCompanionInfluence(Number(e.target.value))}
+                                        />
+                                        <span style={{fontSize: '0.7rem', color: '#888', minWidth: 35}}>{Math.round(browCompanionInfluence * 100)}%</span>
+                                    </div>
+
+                                    <div className="hint" style={{marginTop: 10, fontSize: '0.7rem'}}>
+                                        Companion regions shown with dashed outlines.<br/>
+                                        Mouth (cyan), Eyes (green), Brows (orange)
                                     </div>
                                 </>
                             )}
