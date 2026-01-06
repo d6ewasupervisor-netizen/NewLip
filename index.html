@@ -72,7 +72,15 @@
             const [polyPoints, setPolyPoints] = React.useState([]);
             const polyPointsRef = React.useRef([]);
             const [draggedPointIndex, setDraggedPointIndex] = React.useState(null);
-            
+
+            // Anchor adjustment enhancements
+            const [hoveredPoint, setHoveredPoint] = React.useState(null); // {type, index}
+            const [showGrid, setShowGrid] = React.useState(false);
+            const [gridSize, setGridSize] = React.useState(20);
+            const [snapToGrid, setSnapToGrid] = React.useState(false);
+            const [dragStartPos, setDragStartPos] = React.useState(null); // For coordinate display
+            const [keyModifiers, setKeyModifiers] = React.useState({ shift: false, ctrl: false, alt: false });
+
             // Manual Draw mode - now drops predefined shapes
             const [manualDrawMode, setManualDrawMode] = React.useState(false);
             const [manualDrawFeature, setManualDrawFeature] = React.useState('mouth');
@@ -522,6 +530,42 @@
             React.useEffect(() => { rightBrowPointsRef.current = rightBrowPoints; }, [rightBrowPoints]);
             React.useEffect(() => { lipLinePointsRef.current = lipLinePoints; }, [lipLinePoints]);
 
+            // Keyboard event listeners for modifier keys
+            React.useEffect(() => {
+                const handleKeyDown = (e) => {
+                    setKeyModifiers(prev => ({
+                        shift: e.shiftKey,
+                        ctrl: e.ctrlKey || e.metaKey,
+                        alt: e.altKey
+                    }));
+
+                    // Toggle grid with 'G' key
+                    if (e.key === 'g' || e.key === 'G') {
+                        setShowGrid(prev => !prev);
+                    }
+                    // Toggle snap with 'S' key
+                    if ((e.key === 's' || e.key === 'S') && e.ctrlKey) {
+                        e.preventDefault();
+                        setSnapToGrid(prev => !prev);
+                    }
+                };
+
+                const handleKeyUp = (e) => {
+                    setKeyModifiers(prev => ({
+                        shift: e.shiftKey,
+                        ctrl: e.ctrlKey || e.metaKey,
+                        alt: e.altKey
+                    }));
+                };
+
+                window.addEventListener('keydown', handleKeyDown);
+                window.addEventListener('keyup', handleKeyUp);
+                return () => {
+                    window.removeEventListener('keydown', handleKeyDown);
+                    window.removeEventListener('keyup', handleKeyUp);
+                };
+            }, []);
+
             React.useEffect(() => {
                 params.current = { lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap };
                 if (polyPoints.length > 2 && !isAnimating) {
@@ -775,6 +819,34 @@
                 return inside;
             };
 
+            // Snap point to grid
+            const snapPoint = (point, gridSize) => {
+                if (!snapToGrid) return point;
+                return {
+                    x: Math.round(point.x / gridSize) * gridSize,
+                    y: Math.round(point.y / gridSize) * gridSize
+                };
+            };
+
+            // Apply axis constraint (Shift key)
+            const applyAxisConstraint = (newPos, startPos, shiftPressed) => {
+                if (!shiftPressed || !startPos) return newPos;
+                const dx = Math.abs(newPos.x - startPos.x);
+                const dy = Math.abs(newPos.y - startPos.y);
+                // Lock to dominant axis
+                if (dx > dy) {
+                    return { x: newPos.x, y: startPos.y };
+                } else {
+                    return { x: startPos.x, y: newPos.y };
+                }
+            };
+
+            // Apply precision mode (Ctrl key)
+            const applyPrecisionMode = (delta, ctrlPressed) => {
+                const factor = ctrlPressed ? 0.25 : 1.0; // 25% speed for precision
+                return { x: delta.x * factor, y: delta.y * factor };
+            };
+
             // Helper function to transform points from image space to canvas space when zoomed
             // Defined at component level so it can be used in event handlers
             const transformPointToCanvas = (p, zoomed, scale, offset) => {
@@ -942,6 +1014,7 @@
                         // Clicked on a point - start dragging it
                         setDraggedPointIndex(clicked.pointIndex);
                         setDraggedEye(clicked.type);
+                        setDragStartPos(clicked.points[clicked.pointIndex]); // Store original position
                     } else {
                         // Clicked inside polygon - drag whole polygon
                         setIsDraggingPoly(true);
@@ -1063,11 +1136,10 @@
                     let dx = m.x - polyDragStartRef.current.x;
                     let dy = m.y - polyDragStartRef.current.y;
 
-                    // Apply 50% movement reduction when zoomed for fine-tuned positioning
-                    if (isZoomed && zoomScale > 1.0) {
-                        dx *= 0.5;
-                        dy *= 0.5;
-                    }
+                    // Apply precision mode (Ctrl key)
+                    const precisionDelta = applyPrecisionMode({ x: dx, y: dy }, keyModifiers.ctrl);
+                    dx = precisionDelta.x;
+                    dy = precisionDelta.y;
 
                     updatePolygon(draggedEye, polyDragOrigRef.current.map(p => ({ x: p.x + dx, y: p.y + dy })));
                     drawOverlay();
@@ -1081,23 +1153,47 @@
                     else if (draggedEye === 'rightEye') currentPoints = rightEyePoints;
                     else if (draggedEye === 'leftBrow') currentPoints = leftBrowPoints;
                     else if (draggedEye === 'rightBrow') currentPoints = rightBrowPoints;
+                    else if (draggedEye === 'lipLine') currentPoints = lipLinePoints;
 
                     if (currentPoints) {
+                        let newPos = m;
+
+                        // Apply axis constraint (Shift key)
+                        newPos = applyAxisConstraint(newPos, dragStartPos, keyModifiers.shift);
+
+                        // Apply precision mode (Ctrl key)
+                        if (keyModifiers.ctrl && dragStartPos) {
+                            const dx = (newPos.x - dragStartPos.x) * 0.25;
+                            const dy = (newPos.y - dragStartPos.y) * 0.25;
+                            newPos = { x: dragStartPos.x + dx, y: dragStartPos.y + dy };
+                        }
+
+                        // Apply snap to grid (Alt key or snapToGrid enabled)
+                        if (keyModifiers.alt || snapToGrid) {
+                            newPos = snapPoint(newPos, gridSize);
+                        }
+
                         const newPoints = [...currentPoints];
-                        newPoints[draggedPointIndex] = m;
+                        newPoints[draggedPointIndex] = newPos;
                         updatePolygon(draggedEye, newPoints);
                         drawOverlay();
                     }
                     return;
                 }
 
-                // Update cursor based on what's under the mouse
+                // Update cursor based on what's under the mouse and track hovered point
                 let cursor = 'default';
                 const clicked = findClickedPolygon(m);
                 if (clicked) {
-                    if (clicked.pointIndex !== -1) cursor = 'move';
-                    else cursor = isDraggingPoly ? 'grabbing' : 'grab';
+                    if (clicked.pointIndex !== -1) {
+                        cursor = 'move';
+                        setHoveredPoint({ type: clicked.type, index: clicked.pointIndex });
+                    } else {
+                        cursor = isDraggingPoly ? 'grabbing' : 'grab';
+                        setHoveredPoint(null);
+                    }
                 } else {
+                    setHoveredPoint(null);
                     // Check if near edge for adding points (increased radius for touch)
                     const edgeRadius = getHitRadius(15);
                     for (const {poly} of [
@@ -1132,6 +1228,7 @@
                 setDraggedPointIndex(null);
                 setDraggedEye(null);
                 setIsDraggingPoly(false);
+                setDragStartPos(null);
                 polyDragStartRef.current = null;
                 polyDragOrigRef.current = null;
 
@@ -2486,6 +2583,57 @@
                     }
                 }
 
+                // Draw grid if enabled
+                if (showGrid) {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([2, 2]);
+                    for (let x = 0; x < cw; x += gridSize) {
+                        ctx.beginPath();
+                        ctx.moveTo(x, 0);
+                        ctx.lineTo(x, ch);
+                        ctx.stroke();
+                    }
+                    for (let y = 0; y < ch; y += gridSize) {
+                        ctx.beginPath();
+                        ctx.moveTo(0, y);
+                        ctx.lineTo(cw, y);
+                        ctx.stroke();
+                    }
+                    ctx.setLineDash([]);
+                }
+
+                // Helper to draw anchor point with highlight
+                const drawAnchorPoint = (p, index, type, color, outlineColor) => {
+                    const pt = transformPt(p);
+                    const isHovered = hoveredPoint && hoveredPoint.type === type && hoveredPoint.index === index;
+                    const isDragging = draggedEye === type && draggedPointIndex === index;
+
+                    // Draw glow for hovered/dragging points
+                    if (isHovered || isDragging) {
+                        ctx.shadowBlur = 15;
+                        ctx.shadowColor = isDragging ? '#ffff00' : '#ffffff';
+                    }
+
+                    ctx.beginPath();
+                    const radius = getAnchorRadius() * (isHovered ? 1.3 : isDragging ? 1.5 : 1.0);
+                    ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
+
+                    // Fill with color
+                    ctx.fillStyle = isDragging ? '#ffff00' : isHovered ? '#ffaaaa' : color;
+                    ctx.fill();
+
+                    // Draw outline
+                    if (outlineColor) {
+                        ctx.strokeStyle = outlineColor;
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
+
+                    // Reset shadow
+                    ctx.shadowBlur = 0;
+                };
+
                 // Mouth (anchor points increased 25%: 4 -> 5)
                 if (enableMouth && polyPointsRef.current.length > 0) {
                     ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2;
@@ -2498,17 +2646,13 @@
                     }
                     ctx.closePath(); ctx.stroke();
 
-                    ctx.fillStyle = '#fff';
-                    polyPointsRef.current.forEach(p => {
-                        const pt = transformPt(p);
-                        ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, getAnchorRadius(), 0, Math.PI * 2);
-                        ctx.fill();
+                    polyPointsRef.current.forEach((p, i) => {
+                        drawAnchorPoint(p, i, 'mouth', '#fff', '#ff00ff');
                     });
                 }
 
                 // Eyes overlay for editing (anchor points increased 25%: 3 -> 4)
-                const drawEyeOverlay = (eyePoints) => {
+                const drawEyeOverlay = (eyePoints, eyeType) => {
                     if (eyePoints.length > 0) {
                         ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2;
                         ctx.beginPath();
@@ -2520,22 +2664,18 @@
                         }
                         ctx.closePath(); ctx.stroke();
 
-                        ctx.fillStyle = '#fff';
-                        eyePoints.forEach(p => {
-                            const pt = transformPt(p);
-                            ctx.beginPath();
-                            ctx.arc(pt.x, pt.y, getAnchorRadius(), 0, Math.PI * 2);
-                            ctx.fill();
+                        eyePoints.forEach((p, i) => {
+                            drawAnchorPoint(p, i, eyeType, '#fff', '#00ff00');
                         });
                     }
                 };
                 if (enableEyes) {
-                    drawEyeOverlay(leftEyePointsRef.current);
-                    drawEyeOverlay(rightEyePointsRef.current);
+                    drawEyeOverlay(leftEyePointsRef.current, 'leftEye');
+                    drawEyeOverlay(rightEyePointsRef.current, 'rightEye');
                 }
 
                 // Eyebrows overlay (separate from eyes, yellow/orange color)
-                const drawBrowOverlay = (browPoints) => {
+                const drawBrowOverlay = (browPoints, browType) => {
                     if (browPoints.length > 0) {
                         ctx.strokeStyle = '#ffaa00'; ctx.lineWidth = 2;
                         ctx.beginPath();
@@ -2547,17 +2687,13 @@
                         }
                         ctx.closePath(); ctx.stroke();
 
-                        ctx.fillStyle = '#fff';
-                        browPoints.forEach(p => {
-                            const pt = transformPt(p);
-                            ctx.beginPath();
-                            ctx.arc(pt.x, pt.y, getAnchorRadius(), 0, Math.PI * 2);
-                            ctx.fill();
+                        browPoints.forEach((p, i) => {
+                            drawAnchorPoint(p, i, browType, '#fff', '#ffaa00');
                         });
                     }
                 };
-                drawBrowOverlay(leftBrowPointsRef.current);
-                drawBrowOverlay(rightBrowPointsRef.current);
+                drawBrowOverlay(leftBrowPointsRef.current, 'leftBrow');
+                drawBrowOverlay(rightBrowPointsRef.current, 'rightBrow');
 
                 // Editable lip line (anchor points increased 25%: 4 -> 5)
                 if (lipLinePointsRef.current.length > 0) {
@@ -2571,13 +2707,9 @@
                     }
                     ctx.stroke();
 
-                    // Draw anchor points
-                    ctx.fillStyle = '#00ff99';
-                    lipLinePointsRef.current.forEach(p => {
-                        const pt = transformPt(p);
-                        ctx.beginPath();
-                        ctx.arc(pt.x, pt.y, getAnchorRadius(), 0, Math.PI * 2);
-                        ctx.fill();
+                    // Draw anchor points with enhanced visualization
+                    lipLinePointsRef.current.forEach((p, i) => {
+                        drawAnchorPoint(p, i, 'lipLine', '#00ff99', null);
                     });
                 }
 
@@ -2594,6 +2726,55 @@
                     const topLeft = transformPt({ x: lx, y: baseSplitY - 10 });
                     const bottomRight = transformPt({ x: lx + lipW, y: baseSplitY + 10 });
                     ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+                }
+
+                // Display coordinate and modifier status when dragging
+                if (draggedPointIndex !== null && draggedEye) {
+                    let currentPoints;
+                    if (draggedEye === 'mouth') currentPoints = polyPointsRef.current;
+                    else if (draggedEye === 'leftEye') currentPoints = leftEyePointsRef.current;
+                    else if (draggedEye === 'rightEye') currentPoints = rightEyePointsRef.current;
+                    else if (draggedEye === 'leftBrow') currentPoints = leftBrowPointsRef.current;
+                    else if (draggedEye === 'rightBrow') currentPoints = rightBrowPointsRef.current;
+                    else if (draggedEye === 'lipLine') currentPoints = lipLinePointsRef.current;
+
+                    if (currentPoints && currentPoints[draggedPointIndex]) {
+                        const pt = currentPoints[draggedPointIndex];
+                        const canvasPt = transformPt(pt);
+
+                        // Draw coordinate display
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                        ctx.fillRect(canvasPt.x + 15, canvasPt.y - 35, 120, 30);
+                        ctx.fillStyle = '#ffff00';
+                        ctx.font = '12px monospace';
+                        ctx.fillText(`X: ${Math.round(pt.x)} Y: ${Math.round(pt.y)}`, canvasPt.x + 20, canvasPt.y - 15);
+                    }
+                }
+
+                // Display keyboard modifier status
+                const modifiers = [];
+                if (keyModifiers.shift) modifiers.push('⇧ AXIS LOCK');
+                if (keyModifiers.ctrl) modifiers.push('⌃ PRECISION');
+                if (keyModifiers.alt || snapToGrid) modifiers.push('⌥ SNAP');
+                if (showGrid) modifiers.push('GRID');
+
+                if (modifiers.length > 0 || showGrid || snapToGrid) {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillRect(10, ch - 40, 300, 30);
+                    ctx.fillStyle = '#00ff99';
+                    ctx.font = 'bold 14px sans-serif';
+                    ctx.fillText(modifiers.join(' | '), 15, ch - 18);
+                }
+
+                // Display help text
+                if (!isAnimating && image && !isDraggingPoly && draggedPointIndex === null) {
+                    const helpText = 'G:Grid | Shift:Lock Axis | Ctrl:Precision | Alt:Snap';
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                    const textWidth = ctx.measureText(helpText).width;
+                    ctx.fillRect(cw - textWidth - 20, 10, textWidth + 10, 20);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = '12px sans-serif';
+                    ctx.fillText(helpText, cw - textWidth - 15, 24);
                 }
             };
 
