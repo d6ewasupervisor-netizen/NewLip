@@ -3336,9 +3336,12 @@
                 // Companion regions visualization
                 if (showCompanionRegions) {
                     const drawCompanionRegion = (points, color, label) => {
-                        if (points && points.length > 0) {
+                        if (!points || points.length === 0) return;
+
+                        try {
                             // Semi-transparent fill
-                            ctx.fillStyle = color.replace('rgb', 'rgba').replace(')', ', 0.15)');
+                            const rgbaColor = color.includes('rgba') ? color : color.replace('rgb', 'rgba').replace(')', ', 0.15)');
+                            ctx.fillStyle = rgbaColor;
                             ctx.strokeStyle = color;
                             ctx.lineWidth = 1.5;
                             ctx.setLineDash([5, 5]);
@@ -3371,11 +3374,13 @@
                                 ctx.fillStyle = color;
                                 ctx.fillText(label, centerPt.x - textWidth/2, centerPt.y + 3);
                             }
+                        } catch (e) {
+                            console.warn('Error drawing companion region:', e);
                         }
                     };
 
                     // Mouth companion regions (cyan shades)
-                    if (enableMouth && polyPointsRef.current.length > 0) {
+                    if (enableMouth && polyPointsRef.current.length > 0 && mouthCompanionRegionsRef.current) {
                         drawCompanionRegion(mouthCompanionRegionsRef.current.chin, 'rgb(100, 200, 255)', 'chin');
                         drawCompanionRegion(mouthCompanionRegionsRef.current.leftCheek, 'rgb(150, 220, 255)', 'L cheek');
                         drawCompanionRegion(mouthCompanionRegionsRef.current.rightCheek, 'rgb(150, 220, 255)', 'R cheek');
@@ -3383,7 +3388,7 @@
                     }
 
                     // Eye companion regions (green shades)
-                    if (enableEyes) {
+                    if (enableEyes && eyeCompanionRegionsRef.current) {
                         drawCompanionRegion(eyeCompanionRegionsRef.current.leftEyeCorners, 'rgb(100, 255, 150)', 'L corner');
                         drawCompanionRegion(eyeCompanionRegionsRef.current.rightEyeCorners, 'rgb(100, 255, 150)', 'R corner');
                         drawCompanionRegion(eyeCompanionRegionsRef.current.leftUpperCheek, 'rgb(150, 255, 180)', 'L u-cheek');
@@ -3392,10 +3397,12 @@
                     }
 
                     // Brow companion regions (orange shades)
-                    drawCompanionRegion(browCompanionRegionsRef.current.leftForehead, 'rgb(255, 180, 100)', 'L forehead');
-                    drawCompanionRegion(browCompanionRegionsRef.current.rightForehead, 'rgb(255, 180, 100)', 'R forehead');
-                    drawCompanionRegion(browCompanionRegionsRef.current.leftEyelidUpper, 'rgb(255, 200, 130)', 'L eyelid');
-                    drawCompanionRegion(browCompanionRegionsRef.current.rightEyelidUpper, 'rgb(255, 200, 130)', 'R eyelid');
+                    if (browCompanionRegionsRef.current) {
+                        drawCompanionRegion(browCompanionRegionsRef.current.leftForehead, 'rgb(255, 180, 100)', 'L forehead');
+                        drawCompanionRegion(browCompanionRegionsRef.current.rightForehead, 'rgb(255, 180, 100)', 'R forehead');
+                        drawCompanionRegion(browCompanionRegionsRef.current.leftEyelidUpper, 'rgb(255, 200, 130)', 'L eyelid');
+                        drawCompanionRegion(browCompanionRegionsRef.current.rightEyelidUpper, 'rgb(255, 200, 130)', 'R eyelid');
+                    }
                 }
 
                 // Editable lip line (anchor points increased 25%: 4 -> 5)
