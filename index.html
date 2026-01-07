@@ -306,6 +306,54 @@
             font-style: italic;
         }
 
+        .preview-btn-floating {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--accent);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            transition: transform 0.2s, background 0.2s, box-shadow 0.2s;
+            z-index: 15;
+        }
+
+        .preview-btn-floating:hover {
+            transform: scale(1.1);
+            background: #d600d6;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+        }
+
+        .preview-btn-floating:active {
+            transform: scale(0.95);
+        }
+
+        .preview-btn-floating:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .preview-btn-floating svg {
+            width: 24px;
+            height: 24px;
+            fill: #fff;
+        }
+
+        .preview-btn-floating.is-playing {
+            background: #d32f2f;
+        }
+
+        .preview-btn-floating.is-playing:hover {
+            background: #b71c1c;
+        }
+
         .btn:focus {
             outline: 2px solid var(--accent);
             outline-offset: 2px;
@@ -668,6 +716,7 @@
             // Interaction
             const [activeTab, setActiveTab] = React.useState('audio');
             const [isAnimating, setIsAnimating] = React.useState(false);
+            const [isPreviewing, setIsPreviewing] = React.useState(false);
             const [recordedVideo, setRecordedVideo] = React.useState(null);
 
             const [audioUrl, setAudioUrl] = React.useState(null);
@@ -2613,6 +2662,12 @@
                     return;
                 }
 
+                // Stop any preview first
+                if (isPreviewing) {
+                    setIsPreviewing(false);
+                    if(animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+                }
+
                 setStatus("Starting animation...");
                 const bounds = getBounds(polyPoints);
 
@@ -3023,6 +3078,7 @@
 
             const stopEverything = () => {
                 setIsAnimating(false);
+                setIsPreviewing(false);
                 if(animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
                 if(mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') mediaRecorderRef.current.stop();
                 if(audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
@@ -3032,6 +3088,241 @@
                     ctx.putImageData(originalImageDataRef.current, 0, 0);
                     drawOverlay();
                 }
+            };
+
+            const startPreview = async () => {
+                if (polyPoints.length < 3) {
+                    setStatus("Please detect or draw mouth points first!");
+                    return;
+                }
+
+                setStatus("Starting preview...");
+                const bounds = getBounds(polyPoints);
+
+                if (bounds.width > 0 && bounds.height > 0) {
+                    generateMouthTexture(bounds.width, bounds.height);
+                } else {
+                    setStatus("Invalid mouth bounds!");
+                    return;
+                }
+
+                const leftEyeBounds = getBounds(leftEyePoints);
+                const rightEyeBounds = getBounds(rightEyePoints);
+                const ctx = canvasRef.current.getContext('2d');
+
+                const maskCvs = document.createElement('canvas');
+                maskCvs.width = bounds.width; maskCvs.height = bounds.height;
+                const mCtx = maskCvs.getContext('2d');
+                mCtx.beginPath();
+                mCtx.moveTo(polyPoints[0].x - bounds.x, polyPoints[0].y - bounds.y);
+                for(let i=1; i<polyPoints.length; i++) mCtx.lineTo(polyPoints[i].x - bounds.x, polyPoints[i].y - bounds.y);
+                mCtx.closePath();
+                mCtx.fillStyle = '#000000'; mCtx.fill();
+                const maskData = mCtx.getImageData(0,0,bounds.width,bounds.height).data;
+
+                // Eye masks
+                const leftMaskCvs = document.createElement('canvas');
+                leftMaskCvs.width = leftEyeBounds.width; leftMaskCvs.height = leftEyeBounds.height;
+                const lCtx = leftMaskCvs.getContext('2d');
+                lCtx.beginPath();
+                if (leftEyePoints.length > 0) {
+                    lCtx.moveTo(leftEyePoints[0].x - leftEyeBounds.x, leftEyePoints[0].y - leftEyeBounds.y);
+                    for (let i = 1; i < leftEyePoints.length; i++) lCtx.lineTo(leftEyePoints[i].x - leftEyeBounds.x, leftEyePoints[i].y - leftEyeBounds.y);
+                    lCtx.closePath();
+                    lCtx.fill();
+                }
+                const leftMaskData = lCtx.getImageData(0, 0, leftEyeBounds.width, leftEyeBounds.height).data;
+
+                const rightMaskCvs = document.createElement('canvas');
+                rightMaskCvs.width = rightEyeBounds.width; rightMaskCvs.height = rightEyeBounds.height;
+                const rCtx = rightMaskCvs.getContext('2d');
+                rCtx.beginPath();
+                if (rightEyePoints.length > 0) {
+                    rCtx.moveTo(rightEyePoints[0].x - rightEyeBounds.x, rightEyePoints[0].y - rightEyeBounds.y);
+                    for (let i = 1; i < rightEyePoints.length; i++) rCtx.lineTo(rightEyePoints[i].x - rightEyeBounds.x, rightEyePoints[i].y - rightEyeBounds.y);
+                    rCtx.closePath();
+                    rCtx.fill();
+                }
+                const rightMaskData = rCtx.getImageData(0, 0, rightEyeBounds.width, rightEyeBounds.height).data;
+
+                ctx.putImageData(originalImageDataRef.current, 0, 0);
+                const fullData = ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height);
+                const mouthBuffer = new Uint8ClampedArray(bounds.width * bounds.height * 4);
+
+                for(let y=0; y<bounds.height; y++) {
+                    for(let x=0; x<bounds.width; x++) {
+                        const s = ((bounds.y+y)*canvasRef.current.width + (bounds.x+x))*4;
+                        const d = (y*bounds.width+x)*4;
+                        if(s < fullData.data.length && d < mouthBuffer.length) {
+                            mouthBuffer.set(fullData.data.subarray(s, s+4), d);
+                        }
+                    }
+                }
+
+                // Eye buffers
+                const leftEyeBuffer = new Uint8ClampedArray(leftEyeBounds.width * leftEyeBounds.height * 4);
+                for (let y = 0; y < leftEyeBounds.height; y++) {
+                    for (let x = 0; x < leftEyeBounds.width; x++) {
+                        const s = ((leftEyeBounds.y + y) * canvasRef.current.width + (leftEyeBounds.x + x)) * 4;
+                        const d = (y * leftEyeBounds.width + x) * 4;
+                        if (s < fullData.data.length && d < leftEyeBuffer.length) {
+                            leftEyeBuffer.set(fullData.data.subarray(s, s + 4), d);
+                        }
+                    }
+                }
+
+                const rightEyeBuffer = new Uint8ClampedArray(rightEyeBounds.width * rightEyeBounds.height * 4);
+                for (let y = 0; y < rightEyeBounds.height; y++) {
+                    for (let x = 0; x < rightEyeBounds.width; x++) {
+                        const s = ((rightEyeBounds.y + y) * canvasRef.current.width + (rightEyeBounds.x + x)) * 4;
+                        const d = (y * rightEyeBounds.width + x) * 4;
+                        if (s < fullData.data.length && d < rightEyeBuffer.length) {
+                            rightEyeBuffer.set(fullData.data.subarray(s, s + 4), d);
+                        }
+                    }
+                }
+
+                setIsPreviewing(true);
+
+                const startTime = Date.now();
+                let currentOpenness = 0;
+                let prevTarget = 0;
+                let plosiveHold = 0;
+                let plosivePrev = 0;
+                let eyeStateTimer = 0;
+                let currentEyeState = 'normal';
+                let currentPupilX = 0;
+                let currentPupilY = 0;
+                let eyeStateDuration = 0;
+
+                let frameCount = 0;
+                const loop = () => {
+                    frameCount++;
+                    if (frameCount === 1) {
+                        setStatus("Previewing animation...");
+                    }
+
+                    const elapsed = (Date.now() - startTime) / 1000;
+
+                    // Use fallback sine wave animation for preview
+                    const t = elapsed;
+                    let target = Math.abs(Math.sin(t * 8) * 0.5 + Math.sin(t * 19) * 0.4);
+                    let plos = Math.min(1, Math.max(0, (target - prevTarget) * 3));
+                    let cons = Math.min(1, Math.max(0, Math.abs(Math.cos(t * 12)) * 0.35));
+
+                    const snap = params.current.syllableSnap || 0;
+
+                    const rise = plos - plosivePrev;
+                    if (plos > (0.20 - 0.05 * snap) && rise > (0.06 - 0.03 * snap)) {
+                        plosiveHold = 1;
+                    }
+                    plosivePrev = plos;
+
+                    plosiveHold = Math.max(0, plosiveHold - (0.18 + 0.10 * snap));
+                    const closure = (0.45 + 0.35 * snap) * plosiveHold;
+                    target = Math.max(0, target * (1 - closure));
+
+                    target *= params.current.sensitivity;
+                    params.current.articulation = Math.min(1, (cons * 0.9 + plos * 1.1)) * (0.35 + 0.65 * snap);
+
+                    let tVal = Math.max(0, target);
+                    tVal = Math.pow(tVal, 1 - 0.75 * snap);
+
+                    const gate = 0.05 + 0.10 * snap;
+                    tVal = Math.max(0, (tVal - gate) / (1 - gate));
+
+                    const delta = tVal - prevTarget;
+                    if (delta > 0) tVal = Math.min(1, tVal + delta * (0.9 + 1.2 * snap));
+
+                    const base = params.current.smoothing;
+                    const attack = Math.min(1, base + 0.35 * snap);
+                    const release = Math.max(0.02, base * (1 - 0.55 * snap));
+                    const alpha = (tVal > currentOpenness) ? attack : release;
+
+                    currentOpenness += (tVal - currentOpenness) * alpha;
+                    prevTarget = tVal;
+
+                    const maxOpen = bounds.height * 0.45;
+                    const openPixels = Math.floor(currentOpenness * maxOpen);
+
+                    processFrame(openPixels, ctx, bounds, mouthBuffer, maskData);
+
+                    // Eye animation
+                    eyeStateTimer += 1 / 60;
+                    let leftEyeOpen = 1;
+                    let rightEyeOpen = 1;
+
+                    if (eyeStateTimer >= eyeStateDuration) {
+                        eyeStateTimer = 0;
+                        if (eyePresets.length > 0 && Math.random() < 0.3) {
+                            const randomIndex = Math.floor(Math.random() * eyePresets.length);
+                            currentEyeState = eyePresets[randomIndex];
+
+                            if (currentEyeState === 'look_left') { currentPupilX = -0.7; currentPupilY = 0; }
+                            else if (currentEyeState === 'look_right') { currentPupilX = 0.7; currentPupilY = 0; }
+                            else if (currentEyeState === 'look_up') { currentPupilX = 0; currentPupilY = -0.7; }
+                            else if (currentEyeState === 'look_down') { currentPupilX = 0; currentPupilY = 0.7; }
+                            else if (currentEyeState === 'eye_roll') { currentPupilX = 0; currentPupilY = -0.7; }
+                            else { currentPupilX = 0; currentPupilY = 0; }
+
+                            if (currentEyeState === 'blink') eyeStateDuration = 0.15;
+                            else if (currentEyeState === 'wink_left' || currentEyeState === 'wink_right') eyeStateDuration = 0.4;
+                            else if (currentEyeState === 'excited') eyeStateDuration = 1.0 + Math.random() * 1.5;
+                            else if (currentEyeState === 'glare') eyeStateDuration = 0.6 + Math.random() * 1.0;
+                            else if (currentEyeState === 'eye_roll') eyeStateDuration = 1.5;
+                            else eyeStateDuration = 0.8 + Math.random() * 1.5;
+                        } else {
+                            currentEyeState = 'normal';
+                            currentPupilX = 0;
+                            currentPupilY = 0;
+                            eyeStateDuration = 1.0 + Math.random() * 2.0;
+                        }
+                    }
+
+                    if (currentEyeState === 'eye_roll') {
+                        const rollProgress = eyeStateTimer / eyeStateDuration;
+                        const angle = rollProgress * Math.PI * 2;
+                        currentPupilX = Math.sin(angle) * 0.7;
+                        currentPupilY = -Math.cos(angle) * 0.7;
+                    }
+
+                    if (currentEyeState === 'blink') {
+                        leftEyeOpen = 0;
+                        rightEyeOpen = 0;
+                    } else if (currentEyeState === 'wink_left') {
+                        leftEyeOpen = 0;
+                        rightEyeOpen = 1;
+                    } else if (currentEyeState === 'wink_right') {
+                        leftEyeOpen = 1;
+                        rightEyeOpen = 0;
+                    } else if (currentEyeState === 'glare') {
+                        leftEyeOpen = 0.4;
+                        rightEyeOpen = 0.4;
+                    } else if (currentEyeState === 'excited') {
+                        leftEyeOpen = 1.5;
+                        rightEyeOpen = 1.5;
+                    } else {
+                        leftEyeOpen = 1;
+                        rightEyeOpen = 1;
+                    }
+
+                    if (leftEyePoints.length > 2) processEyeFrame(leftEyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY);
+                    if (rightEyePoints.length > 2) processEyeFrame(rightEyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY);
+
+                    animationFrameRef.current = requestAnimationFrame(loop);
+                };
+                loop();
+            };
+
+            const stopPreview = () => {
+                setIsPreviewing(false);
+                if(animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+                if(canvasRef.current && originalImageDataRef.current) {
+                    const ctx = canvasRef.current.getContext('2d');
+                    ctx.putImageData(originalImageDataRef.current, 0, 0);
+                    drawOverlay();
+                }
+                setStatus("Preview stopped");
             };
 
             const handleImageUpload = (e) => {
@@ -3699,6 +3990,24 @@
                             onDoubleClick={handleDoubleClick}
                         />
                         {isDetecting && <div className="overlay-msg"><div className="spinner"></div><span>Scanning Face...</span></div>}
+                        {image && polyPoints.length >= 3 && !isAnimating && (
+                            <button
+                                className={`preview-btn-floating ${isPreviewing ? 'is-playing' : ''}`}
+                                onClick={isPreviewing ? stopPreview : startPreview}
+                                title={isPreviewing ? 'Stop Preview' : 'Preview Animation'}
+                            >
+                                {isPreviewing ? (
+                                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <rect x="6" y="5" width="4" height="14" rx="1" />
+                                        <rect x="14" y="5" width="4" height="14" rx="1" />
+                                    </svg>
+                                ) : (
+                                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M8 5.14v14l11-7-11-7z" />
+                                    </svg>
+                                )}
+                            </button>
+                        )}
                     </div>
 
                     <div className="controls">
