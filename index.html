@@ -979,19 +979,7 @@
 
             const findClickedPolygon = (point) => {
                 // Check which polygon (if any) was clicked
-                // Returns {type: 'mouth'|'leftEye'|'rightEye'|'leftBrow'|'rightBrow'|'lipLine'|'wholeFace', points: array, pointIndex: number}
-
-                // In whole-face mode, select all components at once
-                if (wholeFaceMode) {
-                    const hasAnyComponent = polyPointsRef.current.length > 0 || leftEyePointsRef.current.length > 0 ||
-                                          rightEyePointsRef.current.length > 0 || leftBrowPointsRef.current.length > 0 ||
-                                          rightBrowPointsRef.current.length > 0;
-                    if (hasAnyComponent) {
-                        setWholeFaceSelected(true);
-                        return { type: 'wholeFace', points: [], pointIndex: -1 };
-                    }
-                    return null;
-                }
+                // Returns {type: 'mouth'|'leftEye'|'rightEye'|'leftBrow'|'rightBrow'|'lipLine', points: array, pointIndex: number}
 
                 const pointRadius = getHitRadius(20);
 
@@ -1315,12 +1303,12 @@
                     // Check if near edge for adding points (increased radius for touch)
                     const edgeRadius = getHitRadius(15);
                     for (const {poly} of [
-                        {poly: polyPoints},
-                        {poly: lipLinePoints},
-                        {poly: leftEyePoints},
-                        {poly: rightEyePoints},
-                        {poly: leftBrowPoints},
-                        {poly: rightBrowPoints}
+                        {poly: polyPointsRef.current},
+                        {poly: lipLinePointsRef.current},
+                        {poly: leftEyePointsRef.current},
+                        {poly: rightEyePointsRef.current},
+                        {poly: leftBrowPointsRef.current},
+                        {poly: rightBrowPointsRef.current}
                     ]) {
                         for (let i = 0; i < poly.length; i++) {
                             const p1 = poly[i];
@@ -1435,12 +1423,12 @@
                 // Check all polygons for adding points on edges (zoom-adjusted radius)
                 const edgeRadius = getHitRadius(15);
                 for (const {type, points} of [
-                    {type: 'mouth', points: polyPoints},
-                    {type: 'lipLine', points: lipLinePoints},
-                    {type: 'leftEye', points: leftEyePoints},
-                    {type: 'rightEye', points: rightEyePoints},
-                    {type: 'leftBrow', points: leftBrowPoints},
-                    {type: 'rightBrow', points: rightBrowPoints}
+                    {type: 'mouth', points: polyPointsRef.current},
+                    {type: 'lipLine', points: lipLinePointsRef.current},
+                    {type: 'leftEye', points: leftEyePointsRef.current},
+                    {type: 'rightEye', points: rightEyePointsRef.current},
+                    {type: 'leftBrow', points: leftBrowPointsRef.current},
+                    {type: 'rightBrow', points: rightBrowPointsRef.current}
                 ]) {
                     for (let i = 0; i < points.length; i++) {
                         const p1 = points[i];
