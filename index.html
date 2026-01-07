@@ -2951,8 +2951,8 @@
                         center.y /= outer.length;
 
                         // Calculate expansion based on face size for better scaling
-                        const mouthBounds = getBounds(outer);
-                        const faceRelativeSize = Math.max(mouthBounds.width, mouthBounds.height) / Math.max(srcCvs.width, srcCvs.height);
+                        const detectedMouthBounds = getBounds(outer);
+                        const faceRelativeSize = Math.max(detectedMouthBounds.width, detectedMouthBounds.height) / Math.max(srcCvs.width, srcCvs.height);
 
                         // Adjust expansion: smaller faces need less expansion
                         const horizontalExpand = faceRelativeSize < 0.1 ? 1.25 : 1.4;
