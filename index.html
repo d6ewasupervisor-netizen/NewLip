@@ -97,6 +97,12 @@
             const polyDragStartRef = React.useRef(null);
             const polyDragOrigRef = React.useRef(null);
 
+            // Resize handle state
+            const [isResizing, setIsResizing] = React.useState(false);
+            const [resizingZone, setResizingZone] = React.useState(null); // {type: 'mouth'|'leftEye'|etc}
+            const resizeStartRef = React.useRef(null); // {x, y, bounds, originalPoints}
+            const RESIZE_HANDLE_SIZE = 16;
+
             // Eyes
             const [leftEyePoints, setLeftEyePoints] = React.useState([]);
             const leftEyePointsRef = React.useRef([]);
@@ -172,17 +178,6 @@
             const [isPanning, setIsPanning] = React.useState(false);
             const panStartRef = React.useRef(null);
             const panOffsetStartRef = React.useRef(null);
-
-            // Feature toggles
-            const [enableMouth, setEnableMouth] = React.useState(true);
-            const [enableEyes, setEnableEyes] = React.useState(true);
-
-            // Whole-face selection and programming
-            const [wholeFaceMode, setWholeFaceMode] = React.useState(false);
-            const [wholeFaceSelected, setWholeFaceSelected] = React.useState(false);
-            const [faceProgram, setFaceProgram] = React.useState('');
-            const [programmedParams, setProgrammedParams] = React.useState({});
-            const programmedParamsRef = React.useRef({});
 
             // Undo/Redo system
             const [history, setHistory] = React.useState([]);
@@ -334,193 +329,6 @@
                         break;
                 }
                 return points;
-            };
-
-            // --- FACE PROGRAMMING ENGINE ---
-            const executeFaceCommand = (command) => {
-                try {
-                    const trimmed = command.trim();
-                    if (!trimmed) return { success: true, message: 'Empty command' };
-
-                    // Parse command format: target.action(param1, param2, ...)
-                    const match = trimmed.match(/^(\w+)\.(\w+)\((.*)\)$/);
-                    if (!match) {
-                        return { success: false, message: 'Invalid command format. Use: target.action(params)' };
-                    }
-
-                    const [, target, action, paramsStr] = match;
-                    const params = paramsStr.split(',').map(p => p.trim()).filter(p => p);
-
-                    const newProgrammedParams = { ...programmedParamsRef.current };
-
-                    // Execute commands based on target
-                    if (target === 'mouth') {
-                        if (action === 'open') {
-                            const amount = parseFloat(params[0] || 0.5);
-                            newProgrammedParams.mouthOpen = Math.max(0, Math.min(1, amount));
-                            return { success: true, message: `Mouth opening set to ${(amount * 100).toFixed(0)}%` };
-                        } else if (action === 'smile') {
-                            const amount = parseFloat(params[0] || 0.3);
-                            setLipCurve(Math.max(-0.5, Math.min(0.5, amount)));
-                            return { success: true, message: `Smile set to ${amount.toFixed(2)}` };
-                        } else if (action === 'width') {
-                            const amount = parseFloat(params[0] || 0.85);
-                            setLipWidth(Math.max(0.3, Math.min(1.0, amount)));
-                            return { success: true, message: `Lip width set to ${(amount * 100).toFixed(0)}%` };
-                        } else if (action === 'close') {
-                            newProgrammedParams.mouthOpen = 0;
-                            return { success: true, message: 'Mouth closed' };
-                        }
-                    } else if (target === 'eyes') {
-                        if (action === 'blink') {
-                            if (!eyePresets.includes('blink')) {
-                                setEyePresets([...eyePresets, 'blink']);
-                            }
-                            return { success: true, message: 'Blink enabled' };
-                        } else if (action === 'wink') {
-                            const side = params[0] || 'left';
-                            const preset = side === 'left' ? 'wink_left' : 'wink_right';
-                            if (!eyePresets.includes(preset)) {
-                                setEyePresets([...eyePresets, preset]);
-                            }
-                            return { success: true, message: `${side} wink enabled` };
-                        } else if (action === 'look') {
-                            const direction = params[0] || 'left';
-                            const preset = `look_${direction}`;
-                            if (!eyePresets.includes(preset)) {
-                                setEyePresets([...eyePresets, preset]);
-                            }
-                            return { success: true, message: `Looking ${direction}` };
-                        }
-                    } else if (target === 'face') {
-                        if (action === 'smile') {
-                            const amount = parseFloat(params[0] || 0.3);
-                            setLipCurve(Math.max(-0.5, Math.min(0.5, amount)));
-                            if (!eyePresets.includes('excited')) {
-                                setEyePresets([...eyePresets, 'excited']);
-                            }
-                            return { success: true, message: 'Face smiling!' };
-                        } else if (action === 'reset') {
-                            setLipSplit(0.5);
-                            setLipWidth(0.85);
-                            setCupidBow(0.3);
-                            setLipCurve(0.1);
-                            setSensitivity(1.5);
-                            setSmoothing(0.2);
-                            setProgrammedParams({});
-                            programmedParamsRef.current = {};
-                            return { success: true, message: 'Face parameters reset to defaults' };
-                        } else if (action === 'talk') {
-                            const intensity = parseFloat(params[0] || 1.5);
-                            setSensitivity(Math.max(0.2, Math.min(3.0, intensity)));
-                            return { success: true, message: `Talk intensity set to ${intensity.toFixed(1)}` };
-                        }
-                    } else if (target === 'teeth') {
-                        if (action === 'brightness') {
-                            const amount = parseFloat(params[0] || 0.9);
-                            setTeethBrightness(Math.max(0.2, Math.min(1.0, amount)));
-                            return { success: true, message: `Teeth brightness set to ${(amount * 100).toFixed(0)}%` };
-                        } else if (action === 'shade') {
-                            const amount = parseFloat(params[0] || 0.2);
-                            setTeethShade(Math.max(0, Math.min(1.0, amount)));
-                            return { success: true, message: `Teeth shade set to ${(amount * 100).toFixed(0)}%` };
-                        }
-                    }
-
-                    setProgrammedParams(newProgrammedParams);
-                    programmedParamsRef.current = newProgrammedParams;
-
-                    return { success: false, message: `Unknown command: ${target}.${action}()` };
-                } catch (error) {
-                    return { success: false, message: `Error: ${error.message}` };
-                }
-            };
-
-            const executeFaceProgram = (program) => {
-                const lines = program.split('\n').filter(line => line.trim() && !line.trim().startsWith('//'));
-                const results = [];
-                let successCount = 0;
-                let errorCount = 0;
-
-                for (const line of lines) {
-                    const result = executeFaceCommand(line);
-                    results.push(`${line}: ${result.message}`);
-                    if (result.success) successCount++;
-                    else errorCount++;
-                }
-
-                const summary = `Executed ${lines.length} commands: ${successCount} succeeded, ${errorCount} failed.`;
-                setStatus(summary);
-                return { success: errorCount === 0, message: summary, details: results };
-            };
-
-            const applyFacePreset = (presetName) => {
-                const presets = {
-                    'neutral': () => {
-                        setLipCurve(0);
-                        setLipWidth(0.85);
-                        setCupidBow(0.3);
-                        setSensitivity(1.5);
-                        setSmoothing(0.2);
-                        setEyePresets(['blink']);
-                        setStatus('Applied neutral preset');
-                    },
-                    'happy': () => {
-                        setLipCurve(0.4);
-                        setLipWidth(0.9);
-                        setCupidBow(0.5);
-                        setSensitivity(1.8);
-                        setSmoothing(0.15);
-                        setEyePresets(['blink', 'excited']);
-                        setStatus('Applied happy preset');
-                    },
-                    'calm': () => {
-                        setLipCurve(0.1);
-                        setLipWidth(0.8);
-                        setCupidBow(0.2);
-                        setSensitivity(1.0);
-                        setSmoothing(0.4);
-                        setEyePresets(['blink']);
-                        setStatus('Applied calm preset');
-                    },
-                    'energetic': () => {
-                        setLipCurve(0.3);
-                        setLipWidth(0.95);
-                        setCupidBow(0.4);
-                        setSensitivity(2.5);
-                        setSmoothing(0.1);
-                        setSyllableSnap(0.8);
-                        setEyePresets(['blink', 'excited', 'look_left', 'look_right']);
-                        setStatus('Applied energetic preset');
-                    },
-                    'announcer': () => {
-                        setLipCurve(0.15);
-                        setLipWidth(0.85);
-                        setCupidBow(0.35);
-                        setSensitivity(2.0);
-                        setSmoothing(0.15);
-                        setSyllableSnap(0.6);
-                        setEyePresets(['blink', 'look_left', 'look_right']);
-                        setStatus('Applied announcer preset');
-                    },
-                    'whisper': () => {
-                        setLipCurve(0);
-                        setLipWidth(0.7);
-                        setCupidBow(0.2);
-                        setSensitivity(0.5);
-                        setSmoothing(0.5);
-                        setSyllableSnap(0.2);
-                        setEyePresets(['blink']);
-                        setStatus('Applied whisper preset');
-                    }
-                };
-
-                const preset = presets[presetName];
-                if (preset) {
-                    preset();
-                } else {
-                    setStatus(`Unknown preset: ${presetName}`);
-                }
             };
 
             // --- UNDO/REDO SYSTEM ---
@@ -837,21 +645,6 @@
                 }
             }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints, isZoomed, zoomScale, panOffset]);
 
-            // Animation loop for whole-face selection pulsing effect
-            React.useEffect(() => {
-                let animationId;
-                if (wholeFaceMode && wholeFaceSelected && !isAnimating) {
-                    const animate = () => {
-                        drawOverlay();
-                        animationId = requestAnimationFrame(animate);
-                    };
-                    animationId = requestAnimationFrame(animate);
-                }
-                return () => {
-                    if (animationId) cancelAnimationFrame(animationId);
-                };
-            }, [wholeFaceMode, wholeFaceSelected, isAnimating]);
-
             React.useEffect(() => {
                 const init = async () => {
                     try {
@@ -1089,6 +882,58 @@
                 return inside;
             };
 
+            // Get resize handle position (bottom-right corner of bounding box)
+            const getResizeHandlePos = (points) => {
+                if (!points || points.length < 3) return null;
+                const bounds = getBounds(points);
+                return { x: bounds.x + bounds.width, y: bounds.y + bounds.height };
+            };
+
+            // Check if a point is on a resize handle
+            const isOnResizeHandle = (pt, points) => {
+                const handlePos = getResizeHandlePos(points);
+                if (!handlePos) return false;
+                const handleRadius = getHitRadius(RESIZE_HANDLE_SIZE);
+                return Math.sqrt(Math.pow(pt.x - handlePos.x, 2) + Math.pow(pt.y - handlePos.y, 2)) < handleRadius;
+            };
+
+            // Check all zones for resize handle click
+            const findResizeHandle = (pt) => {
+                const zones = [
+                    { type: 'mouth', points: polyPointsRef.current },
+                    { type: 'leftEye', points: leftEyePointsRef.current },
+                    { type: 'rightEye', points: rightEyePointsRef.current },
+                    { type: 'leftBrow', points: leftBrowPointsRef.current },
+                    { type: 'rightBrow', points: rightBrowPointsRef.current }
+                ];
+                for (const zone of zones) {
+                    if (zone.points.length > 0 && isOnResizeHandle(pt, zone.points)) {
+                        return zone;
+                    }
+                }
+                return null;
+            };
+
+            // Scale points from center
+            const scaleZone = (originalPoints, originalBounds, newBottomRight) => {
+                const centerX = originalBounds.x + originalBounds.width / 2;
+                const centerY = originalBounds.y + originalBounds.height / 2;
+
+                const newWidth = (newBottomRight.x - originalBounds.x);
+                const newHeight = (newBottomRight.y - originalBounds.y);
+
+                const scaleX = newWidth / originalBounds.width;
+                const scaleY = newHeight / originalBounds.height;
+
+                // Use uniform scaling (average of X and Y)
+                const scale = (scaleX + scaleY) / 2;
+
+                return originalPoints.map(p => ({
+                    x: centerX + (p.x - centerX) * scale,
+                    y: centerY + (p.y - centerY) * scale
+                }));
+            };
+
             // Snap point to grid
             const snapPoint = (point, gridSize) => {
                 if (!snapToGrid) return point;
@@ -1288,6 +1133,21 @@
                 }
 
                 const m = getCoords(e);
+
+                // Check if we clicked on a resize handle first
+                const resizeHandle = findResizeHandle(m);
+                if (resizeHandle) {
+                    setIsResizing(true);
+                    setResizingZone(resizeHandle.type);
+                    resizeStartRef.current = {
+                        x: m.x,
+                        y: m.y,
+                        bounds: getBounds(resizeHandle.points),
+                        originalPoints: resizeHandle.points.map(p => ({ ...p }))
+                    };
+                    return;
+                }
+
                 const clicked = findClickedPolygon(m);
 
                 // Check if we clicked on a polygon or point
@@ -1371,6 +1231,20 @@
                 }
 
                 const m = getCoords(e);
+
+                // Handle resizing
+                if (isResizing && resizeStartRef.current && resizingZone) {
+                    const newBottomRight = { x: m.x, y: m.y };
+                    const scaledPoints = scaleZone(
+                        resizeStartRef.current.originalPoints,
+                        resizeStartRef.current.bounds,
+                        newBottomRight
+                    );
+                    updatePolygon(resizingZone, scaledPoints);
+                    drawOverlay();
+                    canvasRef.current.style.cursor = 'nwse-resize';
+                    return;
+                }
 
                 // Manual draw mode - show shape preview following cursor
                 if (manualDrawMode) {
@@ -1465,6 +1339,16 @@
 
                 // Update cursor based on what's under the mouse and track hovered point
                 let cursor = 'default';
+
+                // Check for resize handle first
+                const resizeHandle = findResizeHandle(m);
+                if (resizeHandle) {
+                    cursor = 'nwse-resize';
+                    setHoveredPoint(null);
+                    canvasRef.current.style.cursor = cursor;
+                    return;
+                }
+
                 const clicked = findClickedPolygon(m);
                 if (clicked) {
                     if (clicked.pointIndex !== -1) {
@@ -1497,8 +1381,8 @@
             };
 
             const handleMouseUp = () => {
-                // Save to history if we were dragging
-                if (draggedPointIndex !== null || draggedEye !== null || isDraggingPoly) {
+                // Save to history if we were dragging or resizing
+                if (draggedPointIndex !== null || draggedEye !== null || isDraggingPoly || isResizing) {
                     saveToHistory();
                 }
 
@@ -1506,6 +1390,11 @@
                 setIsPanning(false);
                 panStartRef.current = null;
                 panOffsetStartRef.current = null;
+
+                // Clear resize state
+                setIsResizing(false);
+                setResizingZone(null);
+                resizeStartRef.current = null;
 
                 setDraggedPointIndex(null);
                 setDraggedEye(null);
@@ -1879,8 +1768,9 @@
                 const activeWidthRatio = params.current.lipWidth;
                 const baseSplitY = h * params.current.lipSplit;
 
-                // Soft Edge: fade motion to zero at the top of the selection (prevents hard line near the nose)
-                const softEdgePx = Math.max(10, Math.round(h * 0.18));
+                // Edge blend factor (20% of region from edge fades to zero movement)
+                const edgeBlendX = w * 0.2;
+                const edgeBlendY = h * 0.2;
                 const smooth01 = (t) => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
 
                 const rollPx = Math.max(0, Math.floor((params.current.lipRoll || 0) * 12));
@@ -1892,6 +1782,14 @@
                 for (let x = 0; x < w; x++) {
                     const nx = (x - cx) / (w * activeWidthRatio / 2);
 
+                    // Calculate edge blend factor for this x position (0 at edge, 1 in center)
+                    let blendFactorX = 1;
+                    if (x < edgeBlendX) {
+                        blendFactorX = x / edgeBlendX;
+                    } else if (x > w - edgeBlendX) {
+                        blendFactorX = (w - x) / edgeBlendX;
+                    }
+
                     // Wave Logic
                     const mainCurve = (nx * nx) * params.current.lipCurve * (h * 0.1);
                     const bow = Math.cos(nx * Math.PI * 2.5) * params.current.cupidBow * (h * 0.05);
@@ -1899,11 +1797,11 @@
                     const localSplitY = baseSplitY - mainCurve - bowFaded;
 
                     const curve = (Math.abs(nx) >= 1) ? 0 : Math.cos(nx * (Math.PI / 2));
-                    const shift = Math.floor(openAmount * curve);
+                    const baseShift = Math.floor(openAmount * curve);
 
-                    if (shift > 0) {
-                        let topLipY = Math.floor(localSplitY - (shift * 0.3));
-                        let bottomLipY = Math.floor(localSplitY + (shift * 0.7));
+                    if (baseShift > 0) {
+                        let topLipY = Math.floor(localSplitY - (baseShift * 0.3));
+                        let bottomLipY = Math.floor(localSplitY + (baseShift * 0.7));
 
                         // Jaw Gap: higher slider value = teeth closer (shrink interior opening)
                         const jawClose01 = Math.min(1, Math.max(0, (params.current.jawGap || 0) / 0.3));
@@ -1924,6 +1822,21 @@
                         for (let y = 0; y < h; y++) {
                             const idx = (y * w + x) * 4;
                             if (maskData[idx + 3] === 0) continue;
+
+                            // Calculate edge blend factor for this y position (0 at edge, 1 in center)
+                            let blendFactorY = 1;
+                            if (y < edgeBlendY) {
+                                blendFactorY = y / edgeBlendY;
+                            } else if (y > h - edgeBlendY) {
+                                blendFactorY = (h - y) / edgeBlendY;
+                            }
+
+                            // Combined edge blend factor with smoothstep
+                            const blendFactor = blendFactorX * blendFactorY;
+                            const smoothBlend = smooth01(blendFactor);
+
+                            // Apply edge-blended shift
+                            const shift = baseShift * smoothBlend;
 
                             // Mouth interior
                             if (y > topLipY && y < bottomLipY) {
@@ -2104,73 +2017,109 @@
                 let maxClose = h * 0.4;
                 let closeAmount = (1 - eyeOpen) * maxClose; // Negative for wide open (excited)
 
+                // Calculate pixel shift for eye gaze (shift the actual eyeball pixels)
+                const maxGazeShiftX = w * 0.15; // Max horizontal shift
+                const maxGazeShiftY = h * 0.12; // Max vertical shift
+                const gazeShiftX = currentPupilX * maxGazeShiftX;
+                const gazeShiftY = currentPupilY * maxGazeShiftY;
+
+                // Edge blend factor (20% of region from edge)
+                const edgeBlendX = w * 0.2;
+                const edgeBlendY = h * 0.2;
+
                 for (let x = 0; x < w; x++) {
                     const nx = (x - cx) / (w / 2);
                     const curve = Math.cos(nx * (Math.PI / 2));
 
-                    const shift = Math.floor(closeAmount * curve);
+                    const lidShift = Math.floor(closeAmount * curve);
+
+                    // Calculate edge blend factor for this x position (0 at edge, 1 in center)
+                    let blendFactorX = 1;
+                    if (x < edgeBlendX) {
+                        blendFactorX = x / edgeBlendX;
+                    } else if (x > w - edgeBlendX) {
+                        blendFactorX = (w - x) / edgeBlendX;
+                    }
 
                     for (let y = 0; y < h; y++) {
                         const idx = (y * w + x) * 4;
                         if (maskData[idx + 3] === 0) continue;
 
-                        let srcY = y;
-                        let isLidEdge = false;
+                        // Calculate edge blend factor for this y position
+                        let blendFactorY = 1;
+                        if (y < edgeBlendY) {
+                            blendFactorY = y / edgeBlendY;
+                        } else if (y > h - edgeBlendY) {
+                            blendFactorY = (h - y) / edgeBlendY;
+                        }
 
+                        // Combined edge blend factor (smoothstep for smoother falloff)
+                        const blendFactor = blendFactorX * blendFactorY;
+                        const smoothBlend = blendFactor * blendFactor * (3 - 2 * blendFactor); // Smoothstep
+
+                        let srcY = y;
+                        let srcX = x;
+
+                        // Apply lid movement
                         if (y < baseSplitY) {
                             // Upper lid moves down for close, up for wide
-                            srcY = y - shift;
-                            if (srcY < baseSplitY - Math.abs(shift) - 1) isLidEdge = true;
+                            srcY = y - lidShift * smoothBlend;
                         } else {
                             // Lower lid movement
                             if (closeAmount > 0) {
                                 // Closing: lower lid moves up
-                                srcY = y + (shift * 0.3);
+                                srcY = y + (lidShift * 0.3 * smoothBlend);
                             } else if (closeAmount < 0) {
                                 // Excited/wide: lower lid moves down
-                                srcY = y + (shift * 0.6);
+                                srcY = y + (lidShift * 0.6 * smoothBlend);
                             }
                         }
 
-                        if (srcY < 0) srcY = 0;
-                        if (srcY >= h) srcY = h - 1;
+                        // Apply gaze shift (shift the actual eye pixels) with edge blending
+                        srcX = x - gazeShiftX * smoothBlend;
+                        srcY = srcY - gazeShiftY * smoothBlend;
 
+                        // Clamp source coordinates
+                        srcX = Math.max(0, Math.min(w - 1, srcX));
+                        srcY = Math.max(0, Math.min(h - 1, srcY));
+
+                        // Bilinear interpolation for smooth sampling
+                        const x0 = Math.floor(srcX);
                         const y0 = Math.floor(srcY);
-                        const t = srcY - y0;
+                        const x1 = Math.min(x0 + 1, w - 1);
+                        const y1 = Math.min(y0 + 1, h - 1);
+                        const tx = srcX - x0;
+                        const ty = srcY - y0;
 
-                        const i0 = (y0 * w + x) * 4;
-                        const i1 = Math.min(((y0 + 1) * w + x) * 4, eyeBuffer.length - 4);
+                        const i00 = (y0 * w + x0) * 4;
+                        const i10 = (y0 * w + x1) * 4;
+                        const i01 = (y1 * w + x0) * 4;
+                        const i11 = (y1 * w + x1) * 4;
 
-                        const r = Math.round(eyeBuffer[i0] * (1 - t) + eyeBuffer[i1] * t);
-                        const g = Math.round(eyeBuffer[i0 + 1] * (1 - t) + eyeBuffer[i1 + 1] * t);
-                        const b = Math.round(eyeBuffer[i0 + 2] * (1 - t) + eyeBuffer[i1 + 2] * t);
+                        // Bilinear interpolation
+                        const r = Math.round(
+                            eyeBuffer[i00] * (1 - tx) * (1 - ty) +
+                            eyeBuffer[i10] * tx * (1 - ty) +
+                            eyeBuffer[i01] * (1 - tx) * ty +
+                            eyeBuffer[i11] * tx * ty
+                        );
+                        const g = Math.round(
+                            eyeBuffer[i00 + 1] * (1 - tx) * (1 - ty) +
+                            eyeBuffer[i10 + 1] * tx * (1 - ty) +
+                            eyeBuffer[i01 + 1] * (1 - tx) * ty +
+                            eyeBuffer[i11 + 1] * tx * ty
+                        );
+                        const b = Math.round(
+                            eyeBuffer[i00 + 2] * (1 - tx) * (1 - ty) +
+                            eyeBuffer[i10 + 2] * tx * (1 - ty) +
+                            eyeBuffer[i01 + 2] * (1 - tx) * ty +
+                            eyeBuffer[i11 + 2] * tx * ty
+                        );
 
                         dst[idx] = r;
                         dst[idx + 1] = g;
                         dst[idx + 2] = b;
                         dst[idx + 3] = 255;
-                    }
-                }
-
-                // Draw pupil
-                const pupilRadius = Math.min(w, h) * 0.15;
-                const pupilCx = cx + currentPupilX * (w / 4);
-                const pupilCy = cy + currentPupilY * (h / 4);
-
-                const tempCvs = document.createElement('canvas');
-                tempCvs.width = w; tempCvs.height = h;
-                const tempCtx = tempCvs.getContext('2d');
-                tempCtx.putImageData(currentImg, 0, 0);
-                tempCtx.fillStyle = 'black';
-                tempCtx.beginPath();
-                tempCtx.arc(pupilCx, pupilCy, pupilRadius, 0, Math.PI * 2);
-                tempCtx.fill();
-                const withPupil = tempCtx.getImageData(0, 0, w, h);
-                for (let i = 0; i < dst.length; i += 4) {
-                    if (withPupil.data[i + 3] > 0) {
-                        dst[i] = withPupil.data[i];
-                        dst[i + 1] = withPupil.data[i + 1];
-                        dst[i + 2] = withPupil.data[i + 2];
                     }
                 }
 
@@ -2544,9 +2493,8 @@
                         console.log('Frame', frameCount, '- target:', target.toFixed(3), 'currentOpenness:', currentOpenness.toFixed(3), 'openPixels:', openPixels, 'bounds:', bounds.width + 'x' + bounds.height);
                     }
 
-                    // Only process mouth if enabled
-                    if (enableMouth) {
-                        processFrame(openPixels, ctx, bounds, mouthBuffer, maskData);
+                    // Process mouth animation
+                    processFrame(openPixels, ctx, bounds, mouthBuffer, maskData);
 
                         // Process mouth companion regions with scaled displacement
                         if (mouthCompanionInfluence > 0) {
@@ -2591,11 +2539,9 @@
                                 canvasRef.current.height
                             );
                         }
-                    }
 
-                    // Eye animation - only if enabled
-                    if (enableEyes) {
-                        eyeStateTimer += 1 / 60;
+                    // Eye animation
+                    eyeStateTimer += 1 / 60;
                         let leftEyeOpen = 1;
                         let rightEyeOpen = 1;
 
@@ -2762,7 +2708,6 @@
                                 canvasRef.current.height
                             );
                         }
-                    }
 
                     animationFrameRef.current = requestAnimationFrame(loop);
                 };
@@ -3273,7 +3218,7 @@
                 };
 
                 // Mouth (anchor points increased 25%: 4 -> 5)
-                if (enableMouth && polyPointsRef.current.length > 0) {
+                if (polyPointsRef.current.length > 0) {
                     ctx.strokeStyle = '#ff00ff'; ctx.lineWidth = 2;
                     ctx.beginPath();
                     const firstPt = transformPt(polyPointsRef.current[0]);
@@ -3307,10 +3252,8 @@
                         });
                     }
                 };
-                if (enableEyes) {
-                    drawEyeOverlay(leftEyePointsRef.current, 'leftEye');
-                    drawEyeOverlay(rightEyePointsRef.current, 'rightEye');
-                }
+                drawEyeOverlay(leftEyePointsRef.current, 'leftEye');
+                drawEyeOverlay(rightEyePointsRef.current, 'rightEye');
 
                 // Eyebrows overlay (separate from eyes, yellow/orange color)
                 const drawBrowOverlay = (browPoints, browType) => {
@@ -3332,6 +3275,62 @@
                 };
                 drawBrowOverlay(leftBrowPointsRef.current, 'leftBrow');
                 drawBrowOverlay(rightBrowPointsRef.current, 'rightBrow');
+
+                // Draw resize handles for all zones
+                const drawResizeHandle = (points, color) => {
+                    if (!points || points.length < 3) return;
+                    const handlePos = getResizeHandlePos(points);
+                    if (!handlePos) return;
+
+                    const pt = transformPt(handlePos);
+                    const handleSize = RESIZE_HANDLE_SIZE;
+
+                    // Draw handle background
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillRect(pt.x - handleSize/2, pt.y - handleSize/2, handleSize, handleSize);
+
+                    // Draw handle border
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(pt.x - handleSize/2, pt.y - handleSize/2, handleSize, handleSize);
+
+                    // Draw diagonal resize icon
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(pt.x - 4, pt.y + 4);
+                    ctx.lineTo(pt.x + 4, pt.y - 4);
+                    ctx.stroke();
+
+                    // Draw arrows
+                    ctx.beginPath();
+                    ctx.moveTo(pt.x + 4, pt.y - 4);
+                    ctx.lineTo(pt.x + 1, pt.y - 4);
+                    ctx.moveTo(pt.x + 4, pt.y - 4);
+                    ctx.lineTo(pt.x + 4, pt.y - 1);
+                    ctx.moveTo(pt.x - 4, pt.y + 4);
+                    ctx.lineTo(pt.x - 1, pt.y + 4);
+                    ctx.moveTo(pt.x - 4, pt.y + 4);
+                    ctx.lineTo(pt.x - 4, pt.y + 1);
+                    ctx.stroke();
+                };
+
+                // Draw resize handles for each zone
+                if (polyPointsRef.current.length > 0) {
+                    drawResizeHandle(polyPointsRef.current, '#ff00ff');
+                }
+                if (leftEyePointsRef.current.length > 0) {
+                    drawResizeHandle(leftEyePointsRef.current, '#00ff00');
+                }
+                if (rightEyePointsRef.current.length > 0) {
+                    drawResizeHandle(rightEyePointsRef.current, '#00ff00');
+                }
+                if (leftBrowPointsRef.current.length > 0) {
+                    drawResizeHandle(leftBrowPointsRef.current, '#ffaa00');
+                }
+                if (rightBrowPointsRef.current.length > 0) {
+                    drawResizeHandle(rightBrowPointsRef.current, '#ffaa00');
+                }
 
                 // Companion regions visualization
                 if (showCompanionRegions) {
@@ -3380,7 +3379,7 @@
                     };
 
                     // Mouth companion regions (cyan shades)
-                    if (enableMouth && polyPointsRef.current.length > 0 && mouthCompanionRegionsRef.current) {
+                    if (polyPointsRef.current.length > 0 && mouthCompanionRegionsRef.current) {
                         drawCompanionRegion(mouthCompanionRegionsRef.current.chin, 'rgb(100, 200, 255)', 'chin');
                         drawCompanionRegion(mouthCompanionRegionsRef.current.leftCheek, 'rgb(150, 220, 255)', 'L cheek');
                         drawCompanionRegion(mouthCompanionRegionsRef.current.rightCheek, 'rgb(150, 220, 255)', 'R cheek');
@@ -3388,7 +3387,7 @@
                     }
 
                     // Eye companion regions (green shades)
-                    if (enableEyes && eyeCompanionRegionsRef.current) {
+                    if (eyeCompanionRegionsRef.current) {
                         drawCompanionRegion(eyeCompanionRegionsRef.current.leftEyeCorners, 'rgb(100, 255, 150)', 'L corner');
                         drawCompanionRegion(eyeCompanionRegionsRef.current.rightEyeCorners, 'rgb(100, 255, 150)', 'R corner');
                         drawCompanionRegion(eyeCompanionRegionsRef.current.leftUpperCheek, 'rgb(150, 255, 180)', 'L u-cheek');
@@ -3461,55 +3460,6 @@
                     }
                 }
 
-                // Whole-face selection visual indicator
-                if (wholeFaceMode && wholeFaceSelected) {
-                    // Calculate bounding box that encompasses all face components
-                    let allPoints = [];
-                    if (polyPointsRef.current.length > 0) allPoints = allPoints.concat(polyPointsRef.current);
-                    if (leftEyePointsRef.current.length > 0) allPoints = allPoints.concat(leftEyePointsRef.current);
-                    if (rightEyePointsRef.current.length > 0) allPoints = allPoints.concat(rightEyePointsRef.current);
-                    if (leftBrowPointsRef.current.length > 0) allPoints = allPoints.concat(leftBrowPointsRef.current);
-                    if (rightBrowPointsRef.current.length > 0) allPoints = allPoints.concat(rightBrowPointsRef.current);
-
-                    if (allPoints.length > 0) {
-                        const bounds = getBounds(allPoints);
-                        const padding = 30;
-                        const boxX = bounds.x - padding;
-                        const boxY = bounds.y - padding;
-                        const boxW = bounds.width + padding * 2;
-                        const boxH = bounds.height + padding * 2;
-
-                        // Transform bounds to canvas space if zoomed
-                        const topLeft = transformPt({ x: boxX, y: boxY });
-                        const bottomRight = transformPt({ x: boxX + boxW, y: boxY + boxH });
-
-                        // Draw pulsing highlight box
-                        const pulseAlpha = 0.3 + 0.2 * Math.sin(Date.now() / 300);
-                        ctx.strokeStyle = `rgba(0, 255, 255, ${pulseAlpha})`;
-                        ctx.lineWidth = 4;
-                        ctx.setLineDash([10, 5]);
-                        ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
-                        ctx.setLineDash([]);
-
-                        // Draw corner markers
-                        ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
-                        const markerSize = 12;
-                        [topLeft,
-                         { x: bottomRight.x, y: topLeft.y },
-                         { x: topLeft.x, y: bottomRight.y },
-                         bottomRight].forEach(corner => {
-                            ctx.fillRect(corner.x - markerSize / 2, corner.y - markerSize / 2, markerSize, markerSize);
-                        });
-
-                        // Draw label
-                        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-                        ctx.fillRect(topLeft.x, topLeft.y - 30, 150, 25);
-                        ctx.fillStyle = '#00ffff';
-                        ctx.font = 'bold 14px sans-serif';
-                        ctx.fillText('WHOLE FACE SELECTED', topLeft.x + 5, topLeft.y - 10);
-                    }
-                }
-
                 // Display keyboard modifier status
                 const modifiers = [];
                 if (keyModifiers.shift) modifiers.push('⇧ AXIS LOCK');
@@ -3575,12 +3525,11 @@
                         <h1>Lip Sync Pro</h1>
                         <div className="panel">
                             <h3>Setup</h3>
-                            <div className="btn-row">
-                                <button className="btn" onClick={autoDetect} disabled={!image || isAnimating}>Auto-Detect</button>
-                                <button className="btn btn-danger" onClick={resetAll}>Reset</button>
+                            <div className="btn-row" style={{marginBottom: 10}}>
+                                <button className="btn btn-danger" onClick={resetAll}>Reset All</button>
                             </div>
 
-                            <h3 style={{marginTop: 15, fontSize: '0.9rem'}}>Manual Place</h3>
+                            <h3 style={{marginTop: 10, fontSize: '0.9rem'}}>Add Selection Zone</h3>
                             <div className="btn-row" style={{alignItems: 'center'}}>
                                 <select
                                     value={manualDrawFeature}
@@ -3616,20 +3565,20 @@
                                         }
                                     }}
                                     disabled={!image || isAnimating}
-                                    title="Click to place a shape, then drag points to refine"
+                                    title="Click to place a shape, then drag corners to resize"
                                     style={{minWidth: '100px'}}
                                 >
-                                    {manualDrawMode ? 'Cancel' : 'Place'}
+                                    {manualDrawMode ? 'Cancel' : 'Drop'}
                                 </button>
                             </div>
                             {manualDrawMode && (
                                 <p style={{fontSize: '0.75rem', color: '#ff9900', marginTop: 8}}>
-                                    Click anywhere to place the {manualDrawFeature} shape. Drag to position, then click to drop.
+                                    Click anywhere to place the {manualDrawFeature} shape.
                                 </p>
                             )}
 
                             <div className="hint">
-                                Tip: Scroll to zoom, drag to pan. Drag points to refine. Double-click edge to add points. Drag inside shape to move it.
+                                Tip: Drag the corner handle to resize zones. Drag points to adjust shape. Drag inside to move.
                             </div>
                         </div>
 
@@ -3854,121 +3803,6 @@
                             </p>
                         </div>
 
-                        <div className="panel">
-                            <h3>Feature Toggles</h3>
-                            <p style={{fontSize: '0.75rem', color: '#888', marginBottom: '10px'}}>
-                                Enable or disable animation features
-                            </p>
-                            <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
-                                <label style={{display: 'flex', alignItems: 'center', cursor: 'pointer'}}>
-                                    <input
-                                        type="checkbox"
-                                        checked={enableMouth}
-                                        onChange={e => setEnableMouth(e.target.checked)}
-                                        style={{marginRight: '8px'}}
-                                    />
-                                    Enable Mouth Animation
-                                </label>
-                                <label style={{display: 'flex', alignItems: 'center', cursor: 'pointer'}}>
-                                    <input
-                                        type="checkbox"
-                                        checked={enableEyes}
-                                        onChange={e => setEnableEyes(e.target.checked)}
-                                        style={{marginRight: '8px'}}
-                                    />
-                                    Enable Eye Animation (includes eyebrows)
-                                </label>
-                                <label style={{display: 'flex', alignItems: 'center', cursor: 'pointer', marginTop: '5px', borderTop: '1px solid #333', paddingTop: '8px'}}>
-                                    <input
-                                        type="checkbox"
-                                        checked={wholeFaceMode}
-                                        onChange={e => {
-                                            setWholeFaceMode(e.target.checked);
-                                            if (!e.target.checked) setWholeFaceSelected(false);
-                                        }}
-                                        style={{marginRight: '8px'}}
-                                    />
-                                    Whole-Face Selection Mode
-                                </label>
-                            </div>
-                            {wholeFaceMode && (
-                                <p style={{fontSize: '0.7rem', color: '#ff9900', marginTop: 8}}>
-                                    Click anywhere to select the entire face. Use programming panel below to control.
-                                </p>
-                            )}
-                        </div>
-
-                        <div className="panel">
-                            <h3>Face Programming</h3>
-                            <p style={{fontSize: '0.75rem', color: '#888', marginBottom: '10px'}}>
-                                Program face behavior with commands
-                            </p>
-
-                            <h3 style={{fontSize: '0.8rem', marginTop: 10}}>Quick Presets</h3>
-                            <div className="btn-row" style={{marginBottom: 5}}>
-                                <button className="btn" onClick={() => applyFacePreset('neutral')}>Neutral</button>
-                                <button className="btn" onClick={() => applyFacePreset('happy')}>Happy</button>
-                                <button className="btn" onClick={() => applyFacePreset('calm')}>Calm</button>
-                            </div>
-                            <div className="btn-row" style={{marginBottom: 5}}>
-                                <button className="btn" onClick={() => applyFacePreset('energetic')}>Energetic</button>
-                                <button className="btn" onClick={() => applyFacePreset('announcer')}>Announcer</button>
-                            </div>
-                            <div className="btn-row">
-                                <button className="btn" onClick={() => applyFacePreset('whisper')}>Whisper</button>
-                            </div>
-
-                            <h3 style={{fontSize: '0.8rem', marginTop: 15}}>Command Script</h3>
-                            <textarea
-                                value={faceProgram}
-                                onChange={e => setFaceProgram(e.target.value)}
-                                placeholder={"// Examples:\nmouth.open(0.8)\nface.smile(0.5)\neyes.blink()\nface.talk(2.0)"}
-                                style={{
-                                    width: '100%',
-                                    background: '#1a1a1a',
-                                    color: '#0f0',
-                                    border: '1px solid #333',
-                                    padding: 10,
-                                    borderRadius: 4,
-                                    minHeight: 100,
-                                    fontFamily: 'monospace',
-                                    fontSize: '0.85rem'
-                                }}
-                            />
-                            <button
-                                className="btn btn-primary"
-                                onClick={() => executeFaceProgram(faceProgram)}
-                                style={{marginTop: 10, width: '100%'}}
-                                disabled={!faceProgram.trim()}
-                            >
-                                Execute Commands
-                            </button>
-
-                            <div style={{
-                                marginTop: 10,
-                                padding: 10,
-                                background: '#0a0a0a',
-                                borderRadius: 4,
-                                fontSize: '0.7rem',
-                                color: '#888',
-                                maxHeight: 120,
-                                overflowY: 'auto'
-                            }}>
-                                <div style={{fontWeight: 'bold', marginBottom: 5, color: '#00ff99'}}>Available Commands:</div>
-                                <div>mouth.open(0-1) - Set mouth opening</div>
-                                <div>mouth.smile(0-1) - Set smile amount</div>
-                                <div>mouth.width(0.3-1) - Set lip width</div>
-                                <div>mouth.close() - Close mouth</div>
-                                <div>eyes.blink() - Enable blinking</div>
-                                <div>eyes.wink(left/right) - Enable winking</div>
-                                <div>eyes.look(left/right/up/down) - Set gaze</div>
-                                <div>face.smile(0-1) - Smile expression</div>
-                                <div>face.talk(0.2-3) - Set talk intensity</div>
-                                <div>face.reset() - Reset all parameters</div>
-                                <div>teeth.brightness(0.2-1) - Set brightness</div>
-                                <div>teeth.shade(0-1) - Set shade (white to yellow)</div>
-                            </div>
-                        </div>
 
                         <div className="panel">
                             <h3>Audio Source</h3>
