@@ -3683,15 +3683,6 @@
                 <div className="layout">
                     <div
                         className="stage"
-                        onMouseDown={handleMouseDown}
-                        onMouseMove={handleMouseMove}
-                        onMouseUp={handleMouseUp}
-                        onMouseLeave={handleMouseUp}
-                        onWheel={handleWheel}
-                        onDoubleClick={handleDoubleClick}
-                        onTouchStart={handleTouchStart}
-                        onTouchMove={handleTouchMove}
-                        onTouchEnd={handleTouchEnd}
                     >
                         {!image && <div className="upload-zone" onClick={()=>document.getElementById('imgIn').click()}><h2>Upload Photo</h2><p>High Resolution Recommended</p><input id="imgIn" type="file" onChange={handleImageUpload} style={{display:'none'}} accept="image/*" /></div>}
                         <canvas
