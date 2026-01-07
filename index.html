@@ -1460,10 +1460,10 @@
             };
 
             // Get hit detection radius adjusted for zoom level
-            // When zoomed in, we need larger hit areas in image space since the view is magnified
+            // When zoomed in, we need larger hit areas in image space to match the visually larger anchors
             const getHitRadius = (baseRadius) => {
                 if (isZoomed && zoomScale > 1.0) {
-                    return baseRadius / zoomScale;
+                    return baseRadius * zoomScale;
                 }
                 return baseRadius;
             };
@@ -1658,7 +1658,7 @@
             };
 
             const handleMouseMove = (e) => {
-                if (!image) return;
+                if (!image || isAnimating) return;
 
                 // Handle panning when zoomed
                 if (isPanning && panStartRef.current && panOffsetStartRef.current) {
@@ -2007,7 +2007,7 @@
             };
 
             const handleTouchMove = (e) => {
-                if (!image) return;
+                if (!image || isAnimating) return;
                 e.preventDefault();
 
                 // Handle pinch-to-zoom (two fingers)
