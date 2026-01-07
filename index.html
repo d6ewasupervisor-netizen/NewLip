@@ -3166,7 +3166,19 @@
                         onTouchEnd={handleTouchEnd}
                     >
                         {!image && <div className="upload-zone" onClick={()=>document.getElementById('imgIn').click()}><h2>Upload Photo</h2><p>High Resolution Recommended</p><input id="imgIn" type="file" onChange={handleImageUpload} style={{display:'none'}} accept="image/*" /></div>}
-                        <canvas ref={canvasRef} style={{opacity: image?1:0, touchAction: 'none'}} />
+                        <canvas
+                            ref={canvasRef}
+                            style={{opacity: image?1:0, touchAction: 'none'}}
+                            onMouseDown={handleMouseDown}
+                            onMouseMove={handleMouseMove}
+                            onMouseUp={handleMouseUp}
+                            onMouseLeave={handleMouseUp}
+                            onWheel={handleWheel}
+                            onTouchStart={handleTouchStart}
+                            onTouchMove={handleTouchMove}
+                            onTouchEnd={handleTouchEnd}
+                            onDoubleClick={handleDoubleClick}
+                        />
                         {isDetecting && <div className="overlay-msg"><div className="spinner"></div><span>Scanning Face...</span></div>}
                     </div>
 
