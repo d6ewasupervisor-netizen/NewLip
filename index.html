@@ -182,13 +182,16 @@
 
             // Background Removal
             const [bgRemovalEnabled, setBgRemovalEnabled] = React.useState(false);
+            const bgRemovalEnabledRef = React.useRef(false);
             const [bgRemovalThreshold, setBgRemovalThreshold] = React.useState(0.5);
             const [bgRemovalEdge, setBgRemovalEdge] = React.useState(0.1);
             const [isRemovingBg, setIsRemovingBg] = React.useState(false);
 
             // Background/Video
             const [backgroundType, setBackgroundType] = React.useState('none'); // 'none', 'color', 'image', 'video'
+            const backgroundTypeRef = React.useRef('none');
             const [backgroundColor, setBackgroundColor] = React.useState('#000000');
+            const backgroundColorRef = React.useRef('#000000');
             const [backgroundImage, setBackgroundImage] = React.useState(null);
             const [backgroundVideo, setBackgroundVideo] = React.useState(null);
 
@@ -431,6 +434,7 @@
 
                         maskCtx.putImageData(imageData, 0, 0);
                         characterMaskRef.current = maskCanvas;
+                        bgRemovalEnabledRef.current = true;
                         setBgRemovalEnabled(true);
                         setStatus('Background removed. Adjust threshold/edge if needed.');
                         drawOverlay();
@@ -445,6 +449,7 @@
 
             const resetBackgroundRemoval = () => {
                 characterMaskRef.current = null;
+                bgRemovalEnabledRef.current = false;
                 setBgRemovalEnabled(false);
                 drawOverlay();
             };
@@ -459,6 +464,7 @@
                     const img = new Image();
                     img.onload = () => {
                         setBackgroundImage(img);
+                        backgroundTypeRef.current = 'image';
                         setBackgroundType('image');
                         setStatus('Background image loaded');
                         drawOverlay();
@@ -482,6 +488,7 @@
                 video.onloadedmetadata = () => {
                     setBackgroundVideo(video);
                     backgroundVideoRef.current = video;
+                    backgroundTypeRef.current = 'video';
                     setBackgroundType('video');
                     setStatus('Background video loaded');
 
@@ -506,6 +513,7 @@
                 }
                 setBackgroundImage(null);
                 setBackgroundVideo(null);
+                backgroundTypeRef.current = 'none';
                 setBackgroundType('none');
                 backgroundVideoRef.current = null;
                 drawOverlay();
@@ -532,6 +540,9 @@
             React.useEffect(() => { leftBrowPointsRef.current = leftBrowPoints; }, [leftBrowPoints]);
             React.useEffect(() => { rightBrowPointsRef.current = rightBrowPoints; }, [rightBrowPoints]);
             React.useEffect(() => { lipLinePointsRef.current = lipLinePoints; }, [lipLinePoints]);
+            React.useEffect(() => { bgRemovalEnabledRef.current = bgRemovalEnabled; }, [bgRemovalEnabled]);
+            React.useEffect(() => { backgroundTypeRef.current = backgroundType; }, [backgroundType]);
+            React.useEffect(() => { backgroundColorRef.current = backgroundColor; }, [backgroundColor]);
 
             // Keyboard event listeners for modifier keys
             React.useEffect(() => {
@@ -972,9 +983,9 @@
 
                 // In whole-face mode, select all components at once
                 if (wholeFaceMode) {
-                    const hasAnyComponent = polyPoints.length > 0 || leftEyePoints.length > 0 ||
-                                          rightEyePoints.length > 0 || leftBrowPoints.length > 0 ||
-                                          rightBrowPoints.length > 0;
+                    const hasAnyComponent = polyPointsRef.current.length > 0 || leftEyePointsRef.current.length > 0 ||
+                                          rightEyePointsRef.current.length > 0 || leftBrowPointsRef.current.length > 0 ||
+                                          rightBrowPointsRef.current.length > 0;
                     if (hasAnyComponent) {
                         setWholeFaceSelected(true);
                         return { type: 'wholeFace', points: [], pointIndex: -1 };
@@ -984,36 +995,36 @@
 
                 const pointRadius = getHitRadius(20);
 
-                // Check mouth points
-                const mouthIdx = polyPoints.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (mouthIdx !== -1) return { type: 'mouth', points: polyPoints, pointIndex: mouthIdx };
+                // Check mouth points - use refs for current values
+                const mouthIdx = polyPointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
+                if (mouthIdx !== -1) return { type: 'mouth', points: polyPointsRef.current, pointIndex: mouthIdx };
 
-                // Check lip line points
-                const lipLineIdx = lipLinePoints.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (lipLineIdx !== -1) return { type: 'lipLine', points: lipLinePoints, pointIndex: lipLineIdx };
+                // Check lip line points - use refs for current values
+                const lipLineIdx = lipLinePointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
+                if (lipLineIdx !== -1) return { type: 'lipLine', points: lipLinePointsRef.current, pointIndex: lipLineIdx };
 
-                // Check left eye points
-                const leftEyeIdx = leftEyePoints.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (leftEyeIdx !== -1) return { type: 'leftEye', points: leftEyePoints, pointIndex: leftEyeIdx };
+                // Check left eye points - use refs for current values
+                const leftEyeIdx = leftEyePointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
+                if (leftEyeIdx !== -1) return { type: 'leftEye', points: leftEyePointsRef.current, pointIndex: leftEyeIdx };
 
-                // Check right eye points
-                const rightEyeIdx = rightEyePoints.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (rightEyeIdx !== -1) return { type: 'rightEye', points: rightEyePoints, pointIndex: rightEyeIdx };
+                // Check right eye points - use refs for current values
+                const rightEyeIdx = rightEyePointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
+                if (rightEyeIdx !== -1) return { type: 'rightEye', points: rightEyePointsRef.current, pointIndex: rightEyeIdx };
 
-                // Check left eyebrow points
-                const leftBrowIdx = leftBrowPoints.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (leftBrowIdx !== -1) return { type: 'leftBrow', points: leftBrowPoints, pointIndex: leftBrowIdx };
+                // Check left eyebrow points - use refs for current values
+                const leftBrowIdx = leftBrowPointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
+                if (leftBrowIdx !== -1) return { type: 'leftBrow', points: leftBrowPointsRef.current, pointIndex: leftBrowIdx };
 
-                // Check right eyebrow points
-                const rightBrowIdx = rightBrowPoints.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (rightBrowIdx !== -1) return { type: 'rightBrow', points: rightBrowPoints, pointIndex: rightBrowIdx };
+                // Check right eyebrow points - use refs for current values
+                const rightBrowIdx = rightBrowPointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
+                if (rightBrowIdx !== -1) return { type: 'rightBrow', points: rightBrowPointsRef.current, pointIndex: rightBrowIdx };
 
-                // Check if inside polygons (for dragging whole polygon)
-                if (polyPoints.length > 2 && pointInPoly(point, polyPoints)) return { type: 'mouth', points: polyPoints, pointIndex: -1 };
-                if (leftEyePoints.length > 2 && pointInPoly(point, leftEyePoints)) return { type: 'leftEye', points: leftEyePoints, pointIndex: -1 };
-                if (rightEyePoints.length > 2 && pointInPoly(point, rightEyePoints)) return { type: 'rightEye', points: rightEyePoints, pointIndex: -1 };
-                if (leftBrowPoints.length > 2 && pointInPoly(point, leftBrowPoints)) return { type: 'leftBrow', points: leftBrowPoints, pointIndex: -1 };
-                if (rightBrowPoints.length > 2 && pointInPoly(point, rightBrowPoints)) return { type: 'rightBrow', points: rightBrowPoints, pointIndex: -1 };
+                // Check if inside polygons (for dragging whole polygon) - use refs for current values
+                if (polyPointsRef.current.length > 2 && pointInPoly(point, polyPointsRef.current)) return { type: 'mouth', points: polyPointsRef.current, pointIndex: -1 };
+                if (leftEyePointsRef.current.length > 2 && pointInPoly(point, leftEyePointsRef.current)) return { type: 'leftEye', points: leftEyePointsRef.current, pointIndex: -1 };
+                if (rightEyePointsRef.current.length > 2 && pointInPoly(point, rightEyePointsRef.current)) return { type: 'rightEye', points: rightEyePointsRef.current, pointIndex: -1 };
+                if (leftBrowPointsRef.current.length > 2 && pointInPoly(point, leftBrowPointsRef.current)) return { type: 'leftBrow', points: leftBrowPointsRef.current, pointIndex: -1 };
+                if (rightBrowPointsRef.current.length > 2 && pointInPoly(point, rightBrowPointsRef.current)) return { type: 'rightBrow', points: rightBrowPointsRef.current, pointIndex: -1 };
 
                 return null;
             };
@@ -1244,12 +1255,13 @@
 
                 if (draggedPointIndex !== null && draggedEye) {
                     let currentPoints;
-                    if (draggedEye === 'mouth') currentPoints = polyPoints;
-                    else if (draggedEye === 'leftEye') currentPoints = leftEyePoints;
-                    else if (draggedEye === 'rightEye') currentPoints = rightEyePoints;
-                    else if (draggedEye === 'leftBrow') currentPoints = leftBrowPoints;
-                    else if (draggedEye === 'rightBrow') currentPoints = rightBrowPoints;
-                    else if (draggedEye === 'lipLine') currentPoints = lipLinePoints;
+                    // Use refs for current values instead of state
+                    if (draggedEye === 'mouth') currentPoints = polyPointsRef.current;
+                    else if (draggedEye === 'leftEye') currentPoints = leftEyePointsRef.current;
+                    else if (draggedEye === 'rightEye') currentPoints = rightEyePointsRef.current;
+                    else if (draggedEye === 'leftBrow') currentPoints = leftBrowPointsRef.current;
+                    else if (draggedEye === 'rightBrow') currentPoints = rightBrowPointsRef.current;
+                    else if (draggedEye === 'lipLine') currentPoints = lipLinePointsRef.current;
 
                     if (currentPoints) {
                         let newPos = m;
@@ -2796,7 +2808,8 @@
                 const tempCtx = tempCanvas.getContext('2d');
 
                 // Use either the background-removed character or the original image
-                if (bgRemovalEnabled && characterMaskRef.current) {
+                // Use refs for immediate updates
+                if (bgRemovalEnabledRef.current && characterMaskRef.current) {
                     tempCtx.drawImage(characterMaskRef.current, 0, 0);
                 } else if (originalImageDataRef.current) {
                     tempCtx.putImageData(originalImageDataRef.current, 0, 0);
@@ -2806,11 +2819,11 @@
                 ctx.fillStyle = '#000';
                 ctx.fillRect(0, 0, cw, ch);
 
-                // Draw background based on type
-                if (backgroundType === 'color') {
-                    ctx.fillStyle = backgroundColor;
+                // Draw background based on type - use refs for immediate updates
+                if (backgroundTypeRef.current === 'color') {
+                    ctx.fillStyle = backgroundColorRef.current;
                     ctx.fillRect(0, 0, cw, ch);
-                } else if (backgroundType === 'image' && backgroundImage) {
+                } else if (backgroundTypeRef.current === 'image' && backgroundImage) {
                     // Scale and center the background image
                     const bgAspect = backgroundImage.width / backgroundImage.height;
                     const canvasAspect = cw / ch;
@@ -2828,7 +2841,7 @@
                         drawY = (ch - drawH) / 2;
                     }
                     ctx.drawImage(backgroundImage, drawX, drawY, drawW, drawH);
-                } else if (backgroundType === 'video' && backgroundVideoRef.current) {
+                } else if (backgroundTypeRef.current === 'video' && backgroundVideoRef.current) {
                     // Draw current video frame as background
                     const video = backgroundVideoRef.current;
                     const bgAspect = video.videoWidth / video.videoHeight;
@@ -2849,8 +2862,8 @@
                     ctx.drawImage(video, drawX, drawY, drawW, drawH);
                 }
 
-                // Draw the character on top of the background
-                if (bgRemovalEnabled && characterMaskRef.current) {
+                // Draw the character on top of the background - use ref for immediate updates
+                if (bgRemovalEnabledRef.current && characterMaskRef.current) {
                     // Position the character based on characterPosition
                     const charW = tempCanvas.width * characterPosition.scale;
                     const charH = tempCanvas.height * characterPosition.scale;
@@ -3270,10 +3283,10 @@
                         <div className="panel">
                             <h3>Background</h3>
                             <div className="tabs" style={{marginBottom: 10}}>
-                                <div className={`tab ${backgroundType === 'none' ? 'active' : ''}`} onClick={() => { setBackgroundType('none'); drawOverlay(); }}>None</div>
-                                <div className={`tab ${backgroundType === 'color' ? 'active' : ''}`} onClick={() => { setBackgroundType('color'); drawOverlay(); }}>Color</div>
-                                <div className={`tab ${backgroundType === 'image' ? 'active' : ''}`} onClick={() => setBackgroundType('image')}>Image</div>
-                                <div className={`tab ${backgroundType === 'video' ? 'active' : ''}`} onClick={() => setBackgroundType('video')}>Video</div>
+                                <div className={`tab ${backgroundType === 'none' ? 'active' : ''}`} onClick={() => { backgroundTypeRef.current = 'none'; setBackgroundType('none'); drawOverlay(); }}>None</div>
+                                <div className={`tab ${backgroundType === 'color' ? 'active' : ''}`} onClick={() => { backgroundTypeRef.current = 'color'; setBackgroundType('color'); drawOverlay(); }}>Color</div>
+                                <div className={`tab ${backgroundType === 'image' ? 'active' : ''}`} onClick={() => { backgroundTypeRef.current = 'image'; setBackgroundType('image'); }}>Image</div>
+                                <div className={`tab ${backgroundType === 'video' ? 'active' : ''}`} onClick={() => { backgroundTypeRef.current = 'video'; setBackgroundType('video'); }}>Video</div>
                             </div>
 
                             {backgroundType === 'color' && (
@@ -3282,7 +3295,7 @@
                                     <input
                                         type="color"
                                         value={backgroundColor}
-                                        onChange={e => { setBackgroundColor(e.target.value); drawOverlay(); }}
+                                        onChange={e => { backgroundColorRef.current = e.target.value; setBackgroundColor(e.target.value); drawOverlay(); }}
                                         style={{flex: 1, height: 35, cursor: 'pointer'}}
                                     />
                                 </div>
