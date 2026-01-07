@@ -2071,7 +2071,7 @@
                 // Only detect double-tap if user wasn't dragging a point
                 const wasDragging = draggedPointIndex !== null || isDraggingPoly || isResizing;
 
-                // Double-tap detection for mobile
+                // Double-tap detection for mobile (more forgiving for touch accuracy)
                 if (e.changedTouches && e.changedTouches.length === 1 && !wasDragging) {
                     const touch = e.changedTouches[0];
                     const now = Date.now();
@@ -2083,8 +2083,8 @@
                         const dy = tapPos.y - lastTapRef.current.y;
                         const distance = Math.sqrt(dx * dx + dy * dy);
 
-                        // Double-tap detected: within 300ms and 30px
-                        if (timeDiff < 300 && distance < 30) {
+                        // Double-tap detected: within 400ms and 40px (more forgiving for touch)
+                        if (timeDiff < 400 && distance < 40) {
                             lastTapRef.current = null; // Reset to avoid triple-tap
                             handleDoubleClick(e);
                             return;
