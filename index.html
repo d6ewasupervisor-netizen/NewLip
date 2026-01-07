@@ -1946,6 +1946,9 @@
                         updatePolygon(clicked.type, filtered);
                         saveToHistory();
                         drawOverlay();
+                        console.log('✓ Removed anchor point:', clicked.type, 'index:', clicked.pointIndex);
+                    } else {
+                        console.log('✗ Cannot remove point - minimum 3 points required');
                     }
                     return;
                 }
@@ -2085,6 +2088,7 @@
 
                         // Double-tap detected: within 400ms and 40px (more forgiving for touch)
                         if (timeDiff < 400 && distance < 40) {
+                            console.log('✓ Double-tap detected on mobile (time:', timeDiff + 'ms, distance:', Math.round(distance) + 'px)');
                             lastTapRef.current = null; // Reset to avoid triple-tap
                             handleDoubleClick(e);
                             return;
