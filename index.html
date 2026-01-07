@@ -2068,8 +2068,11 @@
                 if (!image) return;
                 e.preventDefault();
 
+                // Only detect double-tap if user wasn't dragging a point
+                const wasDragging = draggedPointIndex !== null || isDraggingPoly || isResizing;
+
                 // Double-tap detection for mobile
-                if (e.changedTouches && e.changedTouches.length === 1) {
+                if (e.changedTouches && e.changedTouches.length === 1 && !wasDragging) {
                     const touch = e.changedTouches[0];
                     const now = Date.now();
                     const tapPos = { x: touch.clientX, y: touch.clientY };
@@ -2088,8 +2091,11 @@
                         }
                     }
 
-                    // Store this tap for next time
+                    // Store this tap for next time (only if not dragging)
                     lastTapRef.current = { x: tapPos.x, y: tapPos.y, time: now };
+                } else if (wasDragging) {
+                    // Clear tap history if user was dragging to prevent false double-tap detection
+                    lastTapRef.current = null;
                 }
 
                 // Reset pinch state
