@@ -2982,13 +2982,13 @@
                         }
                     }
 
-                    // Animate eye_roll in real-time
+                    // Animate eye_roll in real-time - classic eye roll (eyes roll back showing whites)
                     if (currentEyeState === 'eye_roll') {
-                        // Circular motion: progress through the roll
                         const rollProgress = eyeStateTimer / eyeStateDuration;
-                        const angle = rollProgress * Math.PI * 2; // Full circle
-                        currentPupilX = Math.sin(angle) * 0.7;
-                        currentPupilY = -Math.cos(angle) * 0.7; // Start at top (negative Y)
+                        // Classic eye roll: pupils move up and back down using sine curve
+                        // sin(0) = 0, sin(π/2) = 1, sin(π) = 0 - smooth up and back
+                        currentPupilX = 0; // No horizontal movement
+                        currentPupilY = -Math.sin(rollProgress * Math.PI) * 0.85; // Roll up (negative Y = up)
                     }
 
                     // Set eye openness based on state (separate for left/right)
@@ -3279,11 +3279,11 @@
                         }
                     }
 
+                    // Classic eye roll: pupils move up and back down
                     if (currentEyeState === 'eye_roll') {
                         const rollProgress = eyeStateTimer / eyeStateDuration;
-                        const angle = rollProgress * Math.PI * 2;
-                        currentPupilX = Math.sin(angle) * 0.7;
-                        currentPupilY = -Math.cos(angle) * 0.7;
+                        currentPupilX = 0; // No horizontal movement
+                        currentPupilY = -Math.sin(rollProgress * Math.PI) * 0.85; // Roll up (negative Y = up)
                     }
 
                     if (currentEyeState === 'blink') {
