@@ -740,7 +740,6 @@
             // Params
             const [lipSplit, setLipSplit] = React.useState(0.5);
             const [lipWidth, setLipWidth] = React.useState(0.85);
-            const [cupidBow, setCupidBow] = React.useState(0.3);
             const [lipCurve, setLipCurve] = React.useState(0.1);
             
             // 3D Anatomy Params
@@ -812,6 +811,62 @@
                 return { x: Math.floor(minX), y: Math.floor(minY), width: Math.ceil(maxX - minX), height: Math.ceil(maxY - minY) };
             };
 
+            // Calculate anatomically correct eyelid and eyebrow positions relative to eyeball
+            // Based on typical human facial proportions:
+            // - Upper eyelid: ~12-15% of eye height below top of eyeball
+            // - Lower eyelid: ~12-15% of eye height above bottom of eyeball
+            // - Eyebrow: ~30-40% of eye height above top of eyeball
+            const calculateEyeAnatomyOffsets = (eyeBounds) => {
+                if (!eyeBounds || eyeBounds.height < 1) return null;
+                const eyeHeight = eyeBounds.height;
+                const eyeWidth = eyeBounds.width;
+
+                return {
+                    // Eyelid positions (distance from edges of eyeball selection area)
+                    upperLidFromTop: Math.round(eyeHeight * 0.12),      // Upper lid sits ~12% below top edge
+                    lowerLidFromBottom: Math.round(eyeHeight * 0.12),  // Lower lid sits ~12% above bottom edge
+
+                    // Eyebrow position (distance above top of eyeball)
+                    eyebrowAboveEye: Math.round(eyeHeight * 0.35),     // Brow sits ~35% of eye height above top
+
+                    // Eyebrow dimensions relative to eye
+                    eyebrowWidth: Math.round(eyeWidth * 1.2),          // Brow ~20% wider than eye
+                    eyebrowHeight: Math.round(eyeHeight * 0.25),       // Brow height ~25% of eye height
+
+                    // For animation reference
+                    eyeCenter: {
+                        x: eyeBounds.x + eyeWidth / 2,
+                        y: eyeBounds.y + eyeHeight / 2
+                    }
+                };
+            };
+
+            // Generate eyebrow shape positioned correctly relative to an eye
+            const generateBrowFromEye = (eyePoints, feature) => {
+                if (!eyePoints || eyePoints.length < 3) return [];
+
+                const eyeBounds = getBounds(eyePoints);
+                const anatomy = calculateEyeAnatomyOffsets(eyeBounds);
+                if (!anatomy) return [];
+
+                const points = [];
+                const browY = eyeBounds.y - anatomy.eyebrowAboveEye; // Position above eye
+                const browCenterX = anatomy.eyeCenter.x;
+                const browW = anatomy.eyebrowWidth / 2;
+                const browH = anatomy.eyebrowHeight;
+
+                const flip = feature === 'rightBrow' ? -1 : 1;
+
+                // 5-point curved eyebrow positioned relative to eye
+                points.push({ x: browCenterX - browW, y: browY + browH * 0.3 * flip });
+                points.push({ x: browCenterX - browW * 0.5, y: browY - browH * 0.5 * flip });
+                points.push({ x: browCenterX, y: browY - browH * 0.7 * flip });
+                points.push({ x: browCenterX + browW * 0.5, y: browY - browH * 0.4 * flip });
+                points.push({ x: browCenterX + browW, y: browY + browH * 0.1 });
+
+                return points;
+            };
+
             // Generate basic shapes for manual placement
             const generateBasicShape = (feature, centerX, centerY, canvasWidth, canvasHeight) => {
                 // Scale shapes based on canvas size (assume face takes ~30% of image width)
@@ -835,28 +890,43 @@
                     case 'leftEye':
                     case 'rightEye': {
                         // Almond-shaped eye with 6 points
+                        // Anatomical note: The eye selection represents the visible eyeball/sclera
+                        // Upper eyelid naturally sits ~12% below top, lower lid ~12% above bottom
                         const w = baseScale * 0.5;
                         const h = baseScale * 0.25;
-                        // Create almond shape
-                        points.push({ x: centerX - w, y: centerY }); // left corner
-                        points.push({ x: centerX - w * 0.5, y: centerY - h }); // top left
-                        points.push({ x: centerX + w * 0.5, y: centerY - h }); // top right
-                        points.push({ x: centerX + w, y: centerY }); // right corner
-                        points.push({ x: centerX + w * 0.5, y: centerY + h * 0.7 }); // bottom right
-                        points.push({ x: centerX - w * 0.5, y: centerY + h * 0.7 }); // bottom left
+                        // The h value represents full eye height; eyelids are positioned at:
+                        // - Top lid line: centerY - h + (h * 0.12) = centerY - h * 0.88
+                        // - Bottom lid line: centerY + h * 0.7 - (h * 0.7 * 0.12) = centerY + h * 0.616
+                        points.push({ x: centerX - w, y: centerY }); // left corner (lateral canthus)
+                        points.push({ x: centerX - w * 0.5, y: centerY - h }); // upper left (upper lid)
+                        points.push({ x: centerX + w * 0.5, y: centerY - h }); // upper right (upper lid)
+                        points.push({ x: centerX + w, y: centerY }); // right corner (medial canthus)
+                        points.push({ x: centerX + w * 0.5, y: centerY + h * 0.7 }); // lower right (lower lid)
+                        points.push({ x: centerX - w * 0.5, y: centerY + h * 0.7 }); // lower left (lower lid)
                         break;
                     }
                     case 'leftBrow':
                     case 'rightBrow': {
-                        // Curved eyebrow with 5 points
-                        const w = baseScale * 0.6;
-                        const h = baseScale * 0.15;
+                        // First check if corresponding eye exists - position relative to it
+                        const correspondingEye = feature === 'leftBrow' ? leftEyePointsRef.current : rightEyePointsRef.current;
+                        if (correspondingEye && correspondingEye.length >= 3) {
+                            return generateBrowFromEye(correspondingEye, feature);
+                        }
+
+                        // Fallback: Use anatomical proportions based on center position
+                        // Assume this is positioned above an eye center
+                        const eyeHeight = baseScale * 0.25; // Estimated eye height
+                        const w = eyeHeight * 1.2; // Brow ~120% of eye width (which is baseScale * 0.5)
+                        const h = eyeHeight * 0.25; // Brow height ~25% of eye height
+                        // Position brow ~35% of eye height above the assumed eye top
+                        const browOffset = eyeHeight * 0.35;
                         const flip = feature === 'rightBrow' ? -1 : 1;
-                        points.push({ x: centerX - w, y: centerY + h * 0.5 * flip });
-                        points.push({ x: centerX - w * 0.5, y: centerY - h * flip });
-                        points.push({ x: centerX, y: centerY - h * 1.2 * flip });
-                        points.push({ x: centerX + w * 0.5, y: centerY - h * 0.8 * flip });
-                        points.push({ x: centerX + w, y: centerY });
+
+                        points.push({ x: centerX - w, y: centerY + h * 0.3 * flip });
+                        points.push({ x: centerX - w * 0.5, y: centerY - h * 0.5 * flip });
+                        points.push({ x: centerX, y: centerY - h * 0.7 * flip });
+                        points.push({ x: centerX + w * 0.5, y: centerY - h * 0.4 * flip });
+                        points.push({ x: centerX + w, y: centerY + h * 0.1 });
                         break;
                     }
                     default:
@@ -1160,7 +1230,7 @@
             }, []);
 
             React.useEffect(() => {
-                params.current = { lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap };
+                params.current = { lipSplit, lipWidth, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap };
                 if (polyPoints.length > 2 && !isAnimating) {
                     const bounds = getBounds(polyPoints);
                     generateMouthTexture(bounds.width, bounds.height);
@@ -1173,7 +1243,7 @@
 
                     drawOverlay();
                 }
-            }, [lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints, isZoomed, zoomScale, panOffset]);
+            }, [lipSplit, lipWidth, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten, splitColor, splitTexture, sensitivity, smoothing, lipRoll, syllableSnap, polyPoints, leftEyePoints, rightEyePoints, isZoomed, zoomScale, panOffset]);
 
             React.useEffect(() => {
                 const init = async () => {
@@ -1199,7 +1269,6 @@
                     const data = JSON.parse(saved);
                     setLipSplit(data.lipSplit || 0.5);
                     setLipWidth(data.lipWidth || 0.85);
-                    setCupidBow(data.cupidBow || 0.3);
                     setLipCurve(data.lipCurve || 0.1);
                     setTeethBrightness(data.teethBrightness || 0.9);
                     setTeethShade(data.teethShade || 0.2);
@@ -1232,7 +1301,7 @@
 
             const saveDraft = () => {
                 const data = {
-                    lipSplit, lipWidth, cupidBow, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten,
+                    lipSplit, lipWidth, lipCurve, teethBrightness, teethShade, teethVertical, jawGap, tongueHeight, lipLighten,
                     splitColor, splitTexture, lipRoll, syllableSnap, sensitivity, smoothing,
                     polyPoints, lipLinePoints, leftEyePoints, rightEyePoints,
                     eyePresets, voiceGender, voiceRate, voicePitch, voiceVolume, voiceTimbre, voiceAccent, savedVoiceProfiles, text
@@ -1544,11 +1613,9 @@
                     const x = lx + t * lipW;
                     const nx = (x - cx) / (lipW / 2);
 
-                    // Same curve calculation as the old guide
+                    // Curve calculation for lip line
                     const mainCurve = (nx * nx) * params.current.lipCurve * (b.height * 0.1);
-                    const bow = Math.cos(nx * Math.PI * 2.5) * params.current.cupidBow * (b.height * 0.05);
-                    const bowFaded = bow * Math.max(0, 1 - Math.abs(nx * 1.5));
-                    const y = baseSplitY - mainCurve - bowFaded;
+                    const y = baseSplitY - mainCurve;
 
                     points.push({ x, y });
                 }
@@ -1559,32 +1626,48 @@
             const findClickedPolygon = (point) => {
                 // Check which polygon (if any) was clicked
                 // Returns {type: 'mouth'|'leftEye'|'rightEye'|'leftBrow'|'rightBrow'|'lipLine', points: array, pointIndex: number}
+                // FIX: Find the CLOSEST point within radius, not just the first one found
 
                 const pointRadius = getHitRadius(28);
 
-                // Check mouth points - use refs for current values
-                const mouthIdx = polyPointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (mouthIdx !== -1) return { type: 'mouth', points: polyPointsRef.current, pointIndex: mouthIdx };
+                // Helper to calculate distance
+                const getDistance = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
 
-                // Check lip line points - use refs for current values
-                const lipLineIdx = lipLinePointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (lipLineIdx !== -1) return { type: 'lipLine', points: lipLinePointsRef.current, pointIndex: lipLineIdx };
+                // Collect all candidate points within radius from all zones
+                const candidates = [];
 
-                // Check left eye points - use refs for current values
-                const leftEyeIdx = leftEyePointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (leftEyeIdx !== -1) return { type: 'leftEye', points: leftEyePointsRef.current, pointIndex: leftEyeIdx };
+                // Define all zones to check
+                const zones = [
+                    { type: 'mouth', points: polyPointsRef.current },
+                    { type: 'lipLine', points: lipLinePointsRef.current },
+                    { type: 'leftEye', points: leftEyePointsRef.current },
+                    { type: 'rightEye', points: rightEyePointsRef.current },
+                    { type: 'leftBrow', points: leftBrowPointsRef.current },
+                    { type: 'rightBrow', points: rightBrowPointsRef.current }
+                ];
 
-                // Check right eye points - use refs for current values
-                const rightEyeIdx = rightEyePointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (rightEyeIdx !== -1) return { type: 'rightEye', points: rightEyePointsRef.current, pointIndex: rightEyeIdx };
+                // Check all anchor points across all zones
+                for (const zone of zones) {
+                    if (!zone.points || zone.points.length === 0) continue;
+                    for (let i = 0; i < zone.points.length; i++) {
+                        const dist = getDistance(zone.points[i], point);
+                        if (dist < pointRadius) {
+                            candidates.push({
+                                type: zone.type,
+                                points: zone.points,
+                                pointIndex: i,
+                                distance: dist
+                            });
+                        }
+                    }
+                }
 
-                // Check left eyebrow points - use refs for current values
-                const leftBrowIdx = leftBrowPointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (leftBrowIdx !== -1) return { type: 'leftBrow', points: leftBrowPointsRef.current, pointIndex: leftBrowIdx };
-
-                // Check right eyebrow points - use refs for current values
-                const rightBrowIdx = rightBrowPointsRef.current.findIndex(p => isNearPoint(p, point, pointRadius));
-                if (rightBrowIdx !== -1) return { type: 'rightBrow', points: rightBrowPointsRef.current, pointIndex: rightBrowIdx };
+                // If we have candidates, return the closest one
+                if (candidates.length > 0) {
+                    candidates.sort((a, b) => a.distance - b.distance);
+                    const closest = candidates[0];
+                    return { type: closest.type, points: closest.points, pointIndex: closest.pointIndex };
+                }
 
                 // Check if inside polygons (for dragging whole polygon) - use refs for current values
                 if (polyPointsRef.current.length > 2 && pointInPoly(point, polyPointsRef.current)) return { type: 'mouth', points: polyPointsRef.current, pointIndex: -1 };
@@ -2321,9 +2404,7 @@
 
                     // Wave Logic
                     const mainCurve = (nx * nx) * params.current.lipCurve * (h * 0.1);
-                    const bow = Math.cos(nx * Math.PI * 2.5) * params.current.cupidBow * (h * 0.05);
-                    const bowFaded = bow * Math.max(0, 1 - Math.abs(nx * 1.5));
-                    const localSplitY = baseSplitY - mainCurve - bowFaded;
+                    const localSplitY = baseSplitY - mainCurve;
 
                     const curve = (Math.abs(nx) >= 1) ? 0 : Math.cos(nx * (Math.PI / 2));
                     const baseShift = Math.floor(openAmount * curve);
@@ -4752,10 +4833,6 @@
                             <div className="slider-row">
                                 <label style={{color:'#00ff99'}}>Vertical Center</label>
                                 <input type="range" min="0.3" max="0.7" step="0.01" value={lipSplit} onChange={e=>setLipSplit(Number(e.target.value))} />
-                            </div>
-                            <div className="slider-row">
-                                <label>Cupid's Bow</label>
-                                <input type="range" min="-1.0" max="1.0" step="0.05" value={cupidBow} onChange={e=>setCupidBow(Number(e.target.value))} />
                             </div>
                             <div className="slider-row">
                                 <label>Smile Curve</label>
