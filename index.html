@@ -2556,6 +2556,53 @@
                 const edgeBlendX = w * 0.2;
                 const edgeBlendY = h * 0.2;
 
+                // Calculate average skin tone from edge pixels of the eye buffer for underlayment
+                let skinR = 0, skinG = 0, skinB = 0, skinCount = 0;
+                for (let x = 0; x < w; x++) {
+                    for (let y = 0; y < 3; y++) { // Top edge
+                        const idx = (y * w + x) * 4;
+                        if (maskData[idx + 3] > 0) {
+                            skinR += eyeBuffer[idx];
+                            skinG += eyeBuffer[idx + 1];
+                            skinB += eyeBuffer[idx + 2];
+                            skinCount++;
+                        }
+                    }
+                    for (let y = h - 3; y < h; y++) { // Bottom edge
+                        const idx = (y * w + x) * 4;
+                        if (maskData[idx + 3] > 0) {
+                            skinR += eyeBuffer[idx];
+                            skinG += eyeBuffer[idx + 1];
+                            skinB += eyeBuffer[idx + 2];
+                            skinCount++;
+                        }
+                    }
+                }
+                // Use darker version of skin tone for eyelid underlayment
+                if (skinCount > 0) {
+                    skinR = Math.floor((skinR / skinCount) * 0.7);
+                    skinG = Math.floor((skinG / skinCount) * 0.65);
+                    skinB = Math.floor((skinB / skinCount) * 0.6);
+                } else {
+                    // Fallback dark skin tone
+                    skinR = 80; skinG = 60; skinB = 50;
+                }
+
+                // First pass: Fill the entire masked area with the dark underlayment
+                // This ensures no bleed-through from original image when lid closes
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        const idx = (y * w + x) * 4;
+                        if (maskData[idx + 3] > 0) {
+                            dst[idx] = skinR;
+                            dst[idx + 1] = skinG;
+                            dst[idx + 2] = skinB;
+                            dst[idx + 3] = 255;
+                        }
+                    }
+                }
+
+                // Second pass: Apply the warped eye pixels on top of underlayment
                 for (let x = 0; x < w; x++) {
                     const nx = (x - cx) / (w / 2);
                     const curve = Math.cos(nx * (Math.PI / 2));
@@ -2608,6 +2655,12 @@
                         srcX = x - gazeShiftX * smoothBlend;
                         srcY = srcY - gazeShiftY * smoothBlend;
 
+                        // Check if source is within valid range (not pulling from outside the buffer)
+                        if (srcX < 0 || srcX >= w - 1 || srcY < 0 || srcY >= h - 1) {
+                            // Keep the underlayment color (already set in first pass)
+                            continue;
+                        }
+
                         // Clamp source coordinates
                         srcX = Math.max(0, Math.min(w - 1, srcX));
                         srcY = Math.max(0, Math.min(h - 1, srcY));
@@ -2641,9 +2694,90 @@
                         const b = Math.round(
                             eyeBuffer[i00 + 2] * (1 - tx) * (1 - ty) +
                             eyeBuffer[i10 + 2] * tx * (1 - ty) +
-                            eyeBuffer[i01 + 2] * (1 - tx) * ty +
+                            eyeBuffer[i01 + 1] * (1 - tx) * ty +
                             eyeBuffer[i11 + 2] * tx * ty
                         );
+
+                        dst[idx] = r;
+                        dst[idx + 1] = g;
+                        dst[idx + 2] = b;
+                        dst[idx + 3] = 255;
+                    }
+                }
+
+                ctx.putImageData(currentImg, bounds.x, bounds.y);
+            };
+
+            // Process eyebrow frame - shifts eyebrow pixels up/down for expressions
+            const processBrowFrame = (browRaise, ctx, bounds, browBuffer, maskData) => {
+                if (!originalImageDataRef.current || bounds.width < 1 || bounds.height < 1) return;
+                if (browRaise === 0) return; // No change needed
+
+                const currentImg = ctx.getImageData(bounds.x, bounds.y, bounds.width, bounds.height);
+                const dst = currentImg.data;
+
+                const w = bounds.width;
+                const h = bounds.height;
+                const cx = w / 2;
+
+                // browRaise: positive = raise up, negative = lower down
+                const maxShift = h * 0.4; // Max vertical shift
+                const shiftAmount = browRaise * maxShift;
+
+                // Edge blend regions
+                const edgeBlendX = w * 0.15;
+                const edgeBlendY = h * 0.15;
+
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        const idx = (y * w + x) * 4;
+                        if (maskData[idx + 3] === 0) continue;
+
+                        // Calculate edge blend factors
+                        let blendFactorX = 1;
+                        if (x < edgeBlendX) {
+                            blendFactorX = x / edgeBlendX;
+                        } else if (x > w - edgeBlendX) {
+                            blendFactorX = (w - x) / edgeBlendX;
+                        }
+
+                        let blendFactorY = 1;
+                        if (y < edgeBlendY) {
+                            blendFactorY = y / edgeBlendY;
+                        } else if (y > h - edgeBlendY) {
+                            blendFactorY = (h - y) / edgeBlendY;
+                        }
+
+                        const blendFactor = blendFactorX * blendFactorY;
+                        const smoothBlend = blendFactor * blendFactor * (3 - 2 * blendFactor);
+
+                        // Apply arch curve - more shift in center, less at edges
+                        const nx = (x - cx) / (w / 2);
+                        const archCurve = Math.cos(nx * (Math.PI / 2));
+                        const pixelShift = shiftAmount * archCurve * smoothBlend;
+
+                        // Source Y (shift up means positive srcY offset to pull from below)
+                        let srcY = y + pixelShift;
+
+                        // Clamp and check bounds
+                        if (srcY < 0 || srcY >= h - 1) {
+                            // Outside bounds - use edge pixel or original
+                            continue;
+                        }
+
+                        srcY = Math.max(0, Math.min(h - 1, srcY));
+
+                        // Bilinear interpolation
+                        const y0 = Math.floor(srcY);
+                        const y1 = Math.min(y0 + 1, h - 1);
+                        const ty = srcY - y0;
+
+                        const i0 = (y0 * w + x) * 4;
+                        const i1 = (y1 * w + x) * 4;
+
+                        const r = Math.round(browBuffer[i0] * (1 - ty) + browBuffer[i1] * ty);
+                        const g = Math.round(browBuffer[i0 + 1] * (1 - ty) + browBuffer[i1 + 1] * ty);
+                        const b = Math.round(browBuffer[i0 + 2] * (1 - ty) + browBuffer[i1 + 2] * ty);
 
                         dst[idx] = r;
                         dst[idx + 1] = g;
@@ -2756,6 +2890,65 @@
                     }
                 }
 
+                // Eyebrow bounds, masks, and buffers
+                const leftBrowBounds = getBounds(leftBrowPointsRef.current);
+                const rightBrowBounds = getBounds(rightBrowPointsRef.current);
+
+                // Left eyebrow mask
+                const leftBrowMaskCvs = document.createElement('canvas');
+                leftBrowMaskCvs.width = Math.max(1, leftBrowBounds.width);
+                leftBrowMaskCvs.height = Math.max(1, leftBrowBounds.height);
+                const lbCtx = leftBrowMaskCvs.getContext('2d');
+                lbCtx.beginPath();
+                if (leftBrowPointsRef.current.length > 0) {
+                    lbCtx.moveTo(leftBrowPointsRef.current[0].x - leftBrowBounds.x, leftBrowPointsRef.current[0].y - leftBrowBounds.y);
+                    for (let i = 1; i < leftBrowPointsRef.current.length; i++) {
+                        lbCtx.lineTo(leftBrowPointsRef.current[i].x - leftBrowBounds.x, leftBrowPointsRef.current[i].y - leftBrowBounds.y);
+                    }
+                    lbCtx.closePath();
+                    lbCtx.fill();
+                }
+                const leftBrowMaskData = lbCtx.getImageData(0, 0, Math.max(1, leftBrowBounds.width), Math.max(1, leftBrowBounds.height)).data;
+
+                // Right eyebrow mask
+                const rightBrowMaskCvs = document.createElement('canvas');
+                rightBrowMaskCvs.width = Math.max(1, rightBrowBounds.width);
+                rightBrowMaskCvs.height = Math.max(1, rightBrowBounds.height);
+                const rbCtx = rightBrowMaskCvs.getContext('2d');
+                rbCtx.beginPath();
+                if (rightBrowPointsRef.current.length > 0) {
+                    rbCtx.moveTo(rightBrowPointsRef.current[0].x - rightBrowBounds.x, rightBrowPointsRef.current[0].y - rightBrowBounds.y);
+                    for (let i = 1; i < rightBrowPointsRef.current.length; i++) {
+                        rbCtx.lineTo(rightBrowPointsRef.current[i].x - rightBrowBounds.x, rightBrowPointsRef.current[i].y - rightBrowBounds.y);
+                    }
+                    rbCtx.closePath();
+                    rbCtx.fill();
+                }
+                const rightBrowMaskData = rbCtx.getImageData(0, 0, Math.max(1, rightBrowBounds.width), Math.max(1, rightBrowBounds.height)).data;
+
+                // Eyebrow buffers
+                const leftBrowBuffer = new Uint8ClampedArray(Math.max(1, leftBrowBounds.width) * Math.max(1, leftBrowBounds.height) * 4);
+                for (let y = 0; y < leftBrowBounds.height; y++) {
+                    for (let x = 0; x < leftBrowBounds.width; x++) {
+                        const s = ((leftBrowBounds.y + y) * canvasRef.current.width + (leftBrowBounds.x + x)) * 4;
+                        const d = (y * leftBrowBounds.width + x) * 4;
+                        if (s < fullData.data.length && d < leftBrowBuffer.length) {
+                            leftBrowBuffer.set(fullData.data.subarray(s, s + 4), d);
+                        }
+                    }
+                }
+
+                const rightBrowBuffer = new Uint8ClampedArray(Math.max(1, rightBrowBounds.width) * Math.max(1, rightBrowBounds.height) * 4);
+                for (let y = 0; y < rightBrowBounds.height; y++) {
+                    for (let x = 0; x < rightBrowBounds.width; x++) {
+                        const s = ((rightBrowBounds.y + y) * canvasRef.current.width + (rightBrowBounds.x + x)) * 4;
+                        const d = (y * rightBrowBounds.width + x) * 4;
+                        if (s < fullData.data.length && d < rightBrowBuffer.length) {
+                            rightBrowBuffer.set(fullData.data.subarray(s, s + 4), d);
+                        }
+                    }
+                }
+
                 let audioCtx = audioContextRef.current;
                 if (!audioCtx || audioCtx.state === 'closed') {
                     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -2847,6 +3040,7 @@
                 let currentPupilX = 0;
                 let currentPupilY = 0;
                 let eyeStateDuration = 0; // How long to hold current eye state
+                let browRaise = 0; // Eyebrow raise amount (0 = normal, positive = raised)
 
                 let frameCount = 0;
                 const loop = () => {
@@ -2982,13 +3176,17 @@
                         }
                     }
 
-                    // Animate eye_roll in real-time - classic eye roll (eyes roll back showing whites)
+                    // Animate eye_roll in real-time - classic eye roll (eyes look up, eyebrows raise)
                     if (currentEyeState === 'eye_roll') {
                         const rollProgress = eyeStateTimer / eyeStateDuration;
-                        // Classic eye roll: pupils move up and back down using sine curve
+                        // Classic eye roll: pupils look straight up, eyebrows raise
                         // sin(0) = 0, sin(π/2) = 1, sin(π) = 0 - smooth up and back
                         currentPupilX = 0; // No horizontal movement
-                        currentPupilY = -Math.sin(rollProgress * Math.PI) * 0.85; // Roll up (negative Y = up)
+                        currentPupilY = -Math.sin(rollProgress * Math.PI) * 0.85; // Look up (negative Y = up)
+                        // Raise eyebrows during eye roll
+                        browRaise = Math.sin(rollProgress * Math.PI) * 0.6; // Eyebrows go up with the roll
+                    } else {
+                        browRaise = 0; // Reset eyebrows for other states
                     }
 
                     // Set eye openness based on state (separate for left/right)
@@ -3014,6 +3212,14 @@
 
                         if (leftEyePoints.length > 2) processEyeFrame(leftEyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY);
                         if (rightEyePoints.length > 2) processEyeFrame(rightEyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY);
+
+                        // Eyebrow animation (raise during eye_roll)
+                        if (leftBrowPointsRef.current.length > 2 && browRaise !== 0) {
+                            processBrowFrame(browRaise, ctx, leftBrowBounds, leftBrowBuffer, leftBrowMaskData);
+                        }
+                        if (rightBrowPointsRef.current.length > 2 && browRaise !== 0) {
+                            processBrowFrame(browRaise, ctx, rightBrowBounds, rightBrowBuffer, rightBrowMaskData);
+                        }
 
                     animationFrameRef.current = requestAnimationFrame(loop);
                 };
@@ -3182,6 +3388,65 @@
                     }
                 }
 
+                // Eyebrow bounds, masks, and buffers
+                const leftBrowBounds = getBounds(leftBrowPointsRef.current);
+                const rightBrowBounds = getBounds(rightBrowPointsRef.current);
+
+                // Left eyebrow mask
+                const leftBrowMaskCvs = document.createElement('canvas');
+                leftBrowMaskCvs.width = Math.max(1, leftBrowBounds.width);
+                leftBrowMaskCvs.height = Math.max(1, leftBrowBounds.height);
+                const lbCtx = leftBrowMaskCvs.getContext('2d');
+                lbCtx.beginPath();
+                if (leftBrowPointsRef.current.length > 0) {
+                    lbCtx.moveTo(leftBrowPointsRef.current[0].x - leftBrowBounds.x, leftBrowPointsRef.current[0].y - leftBrowBounds.y);
+                    for (let i = 1; i < leftBrowPointsRef.current.length; i++) {
+                        lbCtx.lineTo(leftBrowPointsRef.current[i].x - leftBrowBounds.x, leftBrowPointsRef.current[i].y - leftBrowBounds.y);
+                    }
+                    lbCtx.closePath();
+                    lbCtx.fill();
+                }
+                const leftBrowMaskData = lbCtx.getImageData(0, 0, Math.max(1, leftBrowBounds.width), Math.max(1, leftBrowBounds.height)).data;
+
+                // Right eyebrow mask
+                const rightBrowMaskCvs = document.createElement('canvas');
+                rightBrowMaskCvs.width = Math.max(1, rightBrowBounds.width);
+                rightBrowMaskCvs.height = Math.max(1, rightBrowBounds.height);
+                const rbCtx = rightBrowMaskCvs.getContext('2d');
+                rbCtx.beginPath();
+                if (rightBrowPointsRef.current.length > 0) {
+                    rbCtx.moveTo(rightBrowPointsRef.current[0].x - rightBrowBounds.x, rightBrowPointsRef.current[0].y - rightBrowBounds.y);
+                    for (let i = 1; i < rightBrowPointsRef.current.length; i++) {
+                        rbCtx.lineTo(rightBrowPointsRef.current[i].x - rightBrowBounds.x, rightBrowPointsRef.current[i].y - rightBrowBounds.y);
+                    }
+                    rbCtx.closePath();
+                    rbCtx.fill();
+                }
+                const rightBrowMaskData = rbCtx.getImageData(0, 0, Math.max(1, rightBrowBounds.width), Math.max(1, rightBrowBounds.height)).data;
+
+                // Eyebrow buffers
+                const leftBrowBuffer = new Uint8ClampedArray(Math.max(1, leftBrowBounds.width) * Math.max(1, leftBrowBounds.height) * 4);
+                for (let y = 0; y < leftBrowBounds.height; y++) {
+                    for (let x = 0; x < leftBrowBounds.width; x++) {
+                        const s = ((leftBrowBounds.y + y) * canvasRef.current.width + (leftBrowBounds.x + x)) * 4;
+                        const d = (y * leftBrowBounds.width + x) * 4;
+                        if (s < fullData.data.length && d < leftBrowBuffer.length) {
+                            leftBrowBuffer.set(fullData.data.subarray(s, s + 4), d);
+                        }
+                    }
+                }
+
+                const rightBrowBuffer = new Uint8ClampedArray(Math.max(1, rightBrowBounds.width) * Math.max(1, rightBrowBounds.height) * 4);
+                for (let y = 0; y < rightBrowBounds.height; y++) {
+                    for (let x = 0; x < rightBrowBounds.width; x++) {
+                        const s = ((rightBrowBounds.y + y) * canvasRef.current.width + (rightBrowBounds.x + x)) * 4;
+                        const d = (y * rightBrowBounds.width + x) * 4;
+                        if (s < fullData.data.length && d < rightBrowBuffer.length) {
+                            rightBrowBuffer.set(fullData.data.subarray(s, s + 4), d);
+                        }
+                    }
+                }
+
                 setIsPreviewing(true);
 
                 const startTime = Date.now();
@@ -3194,6 +3459,7 @@
                 let currentPupilX = 0;
                 let currentPupilY = 0;
                 let eyeStateDuration = 0;
+                let browRaise = 0; // Eyebrow raise amount (0 = normal, positive = raised)
 
                 let frameCount = 0;
                 const loop = () => {
@@ -3279,11 +3545,15 @@
                         }
                     }
 
-                    // Classic eye roll: pupils move up and back down
+                    // Classic eye roll: pupils look straight up, eyebrows raise
                     if (currentEyeState === 'eye_roll') {
                         const rollProgress = eyeStateTimer / eyeStateDuration;
                         currentPupilX = 0; // No horizontal movement
-                        currentPupilY = -Math.sin(rollProgress * Math.PI) * 0.85; // Roll up (negative Y = up)
+                        currentPupilY = -Math.sin(rollProgress * Math.PI) * 0.85; // Look up (negative Y = up)
+                        // Raise eyebrows during eye roll
+                        browRaise = Math.sin(rollProgress * Math.PI) * 0.6; // Eyebrows go up with the roll
+                    } else {
+                        browRaise = 0; // Reset eyebrows for other states
                     }
 
                     if (currentEyeState === 'blink') {
@@ -3308,6 +3578,14 @@
 
                     if (leftEyePoints.length > 2) processEyeFrame(leftEyeOpen, ctx, leftEyeBounds, leftEyeBuffer, leftMaskData, currentPupilX, currentPupilY);
                     if (rightEyePoints.length > 2) processEyeFrame(rightEyeOpen, ctx, rightEyeBounds, rightEyeBuffer, rightMaskData, currentPupilX, currentPupilY);
+
+                    // Eyebrow animation (raise during eye_roll)
+                    if (leftBrowPointsRef.current.length > 2 && browRaise !== 0) {
+                        processBrowFrame(browRaise, ctx, leftBrowBounds, leftBrowBuffer, leftBrowMaskData);
+                    }
+                    if (rightBrowPointsRef.current.length > 2 && browRaise !== 0) {
+                        processBrowFrame(browRaise, ctx, rightBrowBounds, rightBrowBuffer, rightBrowMaskData);
+                    }
 
                     animationFrameRef.current = requestAnimationFrame(loop);
                 };
