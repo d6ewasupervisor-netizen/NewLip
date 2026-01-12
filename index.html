@@ -40,7 +40,7 @@
 
         .layout {
             display: grid;
-            grid-template-columns: 1fr 380px;
+            grid-template-columns: 1fr;
             gap: 20px;
             height: 95vh;
             max-width: 1900px;
@@ -842,50 +842,180 @@
         }
 
         /* ========================================
+           FLOATING FEATURES BANNER
+           ======================================== */
+
+        .floating-banner {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(20, 20, 20, 0.98);
+            backdrop-filter: blur(10px);
+            border: 1px solid #333;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+            z-index: 200;
+            max-width: 450px;
+            min-width: 350px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+        }
+
+        .floating-banner.collapsed {
+            max-height: none;
+        }
+
+        .banner-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            background: linear-gradient(135deg, #1a1a1a 0%, #141414 100%);
+            border-bottom: 1px solid #333;
+            border-radius: 12px 12px 0 0;
+            cursor: move;
+            gap: 12px;
+        }
+
+        .banner-header:active {
+            cursor: grabbing;
+        }
+
+        .banner-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+        }
+
+        .banner-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .banner-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: #2a2a2a;
+            color: #fff;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.2s;
+            font-size: 18px;
+        }
+
+        .banner-btn:hover {
+            background: #333;
+            color: var(--accent);
+        }
+
+        .banner-btn:active {
+            transform: scale(0.95);
+        }
+
+        .banner-dropdown {
+            padding: 16px 20px;
+            background: #1a1a1a;
+            border-bottom: 1px solid #2a2a2a;
+        }
+
+        .banner-dropdown select {
+            width: 100%;
+            padding: 12px;
+            background: #2a2a2a;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            outline: none;
+            transition: 0.2s;
+        }
+
+        .banner-dropdown select:hover {
+            border-color: var(--accent);
+        }
+
+        .banner-dropdown select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(255, 0, 255, 0.2);
+        }
+
+        .banner-content {
+            padding: 20px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            flex: 1;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .banner-content::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .banner-content::-webkit-scrollbar-track {
+            background: #1a1a1a;
+            border-radius: 4px;
+        }
+
+        .banner-content::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+
+        .banner-content::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        .banner-content.collapsed {
+            display: none;
+        }
+
+        /* Action button positioning */
+        .main-action-btn {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 150;
+            padding: 18px 40px;
+            font-size: 1rem;
+            min-width: 250px;
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+        }
+
+        /* ========================================
            RESPONSIVE BREAKPOINTS
            ======================================== */
 
         /* Large tablets and small desktops (1024px - 1199px) */
         @media (max-width: 1199px) {
-            .layout {
-                grid-template-columns: 1fr 320px;
-                gap: 15px;
-            }
-            .controls {
-                padding: 20px;
-            }
-            body {
-                padding: 15px;
+            .floating-banner {
+                max-width: 400px;
+                min-width: 320px;
             }
         }
 
         /* Tablets portrait and landscape (768px - 1023px) */
         @media (max-width: 1023px) {
-            .layout {
-                grid-template-columns: 1fr;
-                height: auto;
-                max-height: 95vh;
+            .floating-banner {
+                max-width: 90vw;
+                min-width: 300px;
+                max-height: 70vh;
             }
 
-            .controls {
-                order: 1;
-                max-height: 45vh;
-                gap: 12px;
-            }
-
-            .stage {
-                order: 2;
-                height: 45vh;
-                min-height: 300px;
-            }
-
-            h1 {
-                font-size: 1.2rem;
-            }
-
-            .slider-row label {
-                width: 100px;
-                font-size: 0.75rem;
+            .banner-content {
+                padding: 15px;
             }
         }
 
@@ -900,25 +1030,46 @@
                 height: auto;
             }
 
-            .controls {
-                padding: 15px;
-                max-height: 50vh;
-                gap: 10px;
+            .floating-banner {
+                top: 10px;
+                left: 10px;
+                right: 10px;
+                min-width: auto;
+                max-width: calc(100vw - 20px);
+                max-height: 60vh;
             }
 
-            .stage {
-                height: 40vh;
-                min-height: 250px;
-                border-radius: 8px;
+            .banner-header {
+                padding: 12px 16px;
+            }
+
+            .banner-title {
+                font-size: 0.9rem;
+            }
+
+            .banner-btn {
+                width: 28px;
+                height: 28px;
+                font-size: 16px;
+            }
+
+            .banner-dropdown {
+                padding: 12px 16px;
+            }
+
+            .banner-content {
+                padding: 12px;
+            }
+
+            .main-action-btn {
+                bottom: 10px;
+                min-width: 200px;
+                padding: 16px 32px;
+                font-size: 0.9rem;
             }
 
             .panel {
                 padding: 12px;
-            }
-
-            h1 {
-                font-size: 1.1rem;
-                padding-bottom: 6px;
             }
 
             h3 {
@@ -1261,6 +1412,13 @@
             const [toasts, setToasts] = React.useState([]);
             const toastIdRef = React.useRef(0);
 
+            // Floating banner state
+            const [selectedFeature, setSelectedFeature] = React.useState('setup');
+            const [bannerCollapsed, setBannerCollapsed] = React.useState(false);
+            const [bannerPosition, setBannerPosition] = React.useState({ x: 20, y: 20 });
+            const [isDraggingBanner, setIsDraggingBanner] = React.useState(false);
+            const bannerDragStartRef = React.useRef(null);
+
             // Interruption management - track if user left/returned to app
             const [appVisible, setAppVisible] = React.useState(true);
             const [lastInteractionTime, setLastInteractionTime] = React.useState(Date.now());
@@ -1380,6 +1538,57 @@
 
                 return { valid: errors.length === 0, errors };
             };
+
+            // Banner drag handlers
+            const handleBannerMouseDown = (e) => {
+                if (e.target.closest('.banner-controls') || e.target.closest('.banner-dropdown')) {
+                    return; // Don't drag if clicking controls or dropdown
+                }
+                setIsDraggingBanner(true);
+                bannerDragStartRef.current = {
+                    mouseX: e.clientX,
+                    mouseY: e.clientY,
+                    bannerX: bannerPosition.x,
+                    bannerY: bannerPosition.y
+                };
+                e.preventDefault();
+            };
+
+            const handleBannerMouseMove = (e) => {
+                if (!isDraggingBanner || !bannerDragStartRef.current) return;
+
+                const dx = e.clientX - bannerDragStartRef.current.mouseX;
+                const dy = e.clientY - bannerDragStartRef.current.mouseY;
+
+                const newX = bannerDragStartRef.current.bannerX + dx;
+                const newY = bannerDragStartRef.current.bannerY + dy;
+
+                // Keep banner within viewport
+                const maxX = window.innerWidth - 350;
+                const maxY = window.innerHeight - 200;
+
+                setBannerPosition({
+                    x: Math.max(10, Math.min(maxX, newX)),
+                    y: Math.max(10, Math.min(maxY, newY))
+                });
+            };
+
+            const handleBannerMouseUp = () => {
+                setIsDraggingBanner(false);
+                bannerDragStartRef.current = null;
+            };
+
+            // Add global mouse handlers for banner dragging
+            React.useEffect(() => {
+                if (isDraggingBanner) {
+                    window.addEventListener('mousemove', handleBannerMouseMove);
+                    window.addEventListener('mouseup', handleBannerMouseUp);
+                    return () => {
+                        window.removeEventListener('mousemove', handleBannerMouseMove);
+                        window.removeEventListener('mouseup', handleBannerMouseUp);
+                    };
+                }
+            }, [isDraggingBanner, bannerPosition]);
 
             // Calculate anatomically correct eyelid and eyebrow positions relative to eyeball
             // Based on typical human facial proportions:
@@ -5116,27 +5325,61 @@
                         )}
                     </div>
 
-                    <div className="controls" id="main-controls" role="main" aria-label="Main application controls">
-                        <h1>Lip Sync Pro</h1>
+                    {/* Floating Features Banner */}
+                    <div
+                        className={`floating-banner ${bannerCollapsed ? 'collapsed' : ''}`}
+                        style={{
+                            left: `${bannerPosition.x}px`,
+                            top: `${bannerPosition.y}px`
+                        }}
+                    >
+                        <div className="banner-header" onMouseDown={handleBannerMouseDown}>
+                            <div className="banner-title">
+                                <span>⚙️</span>
+                                <span>Features</span>
+                            </div>
+                            <div className="banner-controls">
+                                <button
+                                    className="banner-btn"
+                                    onClick={() => setBannerCollapsed(!bannerCollapsed)}
+                                    title={bannerCollapsed ? "Expand" : "Collapse"}
+                                >
+                                    {bannerCollapsed ? '▼' : '▲'}
+                                </button>
+                            </div>
+                        </div>
 
-                        {/* Breadcrumb Navigation */}
-                        <nav className="breadcrumb" aria-label="Application workflow">
-                            <div className={`breadcrumb-item ${!image ? 'active' : ''}`}>
-                                <span>1. Upload</span>
-                            </div>
-                            <span className="breadcrumb-separator" aria-hidden="true">›</span>
-                            <div className={`breadcrumb-item ${image && polyPoints.length === 0 ? 'active' : ''}`}>
-                                <span>2. Setup</span>
-                            </div>
-                            <span className="breadcrumb-separator" aria-hidden="true">›</span>
-                            <div className={`breadcrumb-item ${image && polyPoints.length > 0 && !audioUrl ? 'active' : ''}`}>
-                                <span>3. Audio</span>
-                            </div>
-                            <span className="breadcrumb-separator" aria-hidden="true">›</span>
-                            <div className={`breadcrumb-item ${image && polyPoints.length > 0 && audioUrl && !isAnimating ? 'active' : ''}`}>
-                                <span>4. Animate</span>
-                            </div>
-                        </nav>
+                        {!bannerCollapsed && (
+                            <>
+                                <div className="banner-dropdown">
+                                    <select
+                                        value={selectedFeature}
+                                        onChange={(e) => setSelectedFeature(e.target.value)}
+                                    >
+                                        <optgroup label="Setup & Configuration">
+                                            <option value="setup">Setup & Zones</option>
+                                            <option value="background-removal">Background Removal</option>
+                                            <option value="background">Background Settings</option>
+                                        </optgroup>
+                                        <optgroup label="Audio & Voice">
+                                            <option value="audio">Audio Source</option>
+                                        </optgroup>
+                                        <optgroup label="Animation Controls">
+                                            <option value="lip-geometry">Lip Geometry</option>
+                                            <option value="3d-anatomy">3D Anatomy</option>
+                                            <option value="animation-tuning">Animation Tuning</option>
+                                            <option value="eye-presets">Eye Animation Presets</option>
+                                        </optgroup>
+                                        <optgroup label="Project Management">
+                                            <option value="history">History (Undo/Redo)</option>
+                                            <option value="drafts">Drafts</option>
+                                            <option value="export">Export Options</option>
+                                        </optgroup>
+                                    </select>
+                                </div>
+
+                                <div className="banner-content">
+                                    {selectedFeature === 'setup' && (
 
                         <div className="panel">
                             <h3 id="setup-section">Setup</h3>
@@ -5228,7 +5471,9 @@
                                 Tip: Drag the corner handle to resize zones. Drag points to adjust shape. Drag inside to move.
                             </div>
                         </div>
+                                    )}
 
+                                    {selectedFeature === 'background-removal' && (
                         <div className="panel">
                             <h3>Background Removal</h3>
                             <div className="btn-row">
@@ -5276,8 +5521,9 @@
                                 </>
                             )}
                         </div>
+                                    )}
 
-
+                                    {selectedFeature === 'background' && (
                         <div className="panel">
                             <h3>Background</h3>
                             <div className="tabs" style={{marginBottom: 10}}>
@@ -5365,7 +5611,9 @@
                                 </>
                             )}
                         </div>
+                                    )}
 
+                                    {selectedFeature === 'history' && (
                         <div className="panel">
                             <h3>Undo/Redo</h3>
                             <div className="btn-row">
@@ -5380,8 +5628,9 @@
                                 {history.length > 0 ? `${historyIndex + 1} / ${history.length}` : 'No history'}
                             </p>
                         </div>
+                                    )}
 
-
+                                    {selectedFeature === 'audio' && (
                         <div className="panel">
                             <h3>Audio Source</h3>
                             <div className="tabs">
@@ -5634,7 +5883,9 @@
                                 </div>
                             )}
                         </div>
+                                    )}
 
+                                    {selectedFeature === 'lip-geometry' && (
                         <div className="panel">
                             <h3>Lip Geometry</h3>
                             <div className="slider-row">
@@ -5650,7 +5901,9 @@
                                 <input type="range" min="-0.5" max="0.5" step="0.05" value={lipCurve} onChange={e=>setLipCurve(Number(e.target.value))} />
                             </div>
                         </div>
+                                    )}
 
+                                    {selectedFeature === '3d-anatomy' && (
                         <div className="panel">
                             <h3>3D Anatomy</h3>
 
@@ -5694,7 +5947,9 @@
                                 <input type="range" min="0" max="1" step="0.05" value={splitTexture} onChange={e=>setSplitTexture(Number(e.target.value))} />
                             </div>
                         </div>
+                                    )}
 
+                                    {selectedFeature === 'animation-tuning' && (
                         <div className="panel">
                             <h3>Animation Tuning</h3>
                             <div className="slider-row">
@@ -5717,7 +5972,9 @@
                                 <input type="range" min="0.02" max="0.6" step="0.01" value={smoothing} onChange={e=>setSmoothing(Number(e.target.value))} />
                             </div>
                         </div>
+                                    )}
 
+                                    {selectedFeature === 'eye-presets' && (
                         <div className="panel">
                             <h3>Eye Animation Presets</h3>
                             <p style={{fontSize: '0.75rem', color: '#888', marginBottom: '10px'}}>
@@ -5794,7 +6051,9 @@
                                 </button>
                             </div>
                         </div>
+                                    )}
 
+                                    {selectedFeature === 'drafts' && (
                         <div className="panel">
                             <h3>Drafts</h3>
                             <div className="btn-row">
@@ -5802,7 +6061,9 @@
                                 <button className="btn btn-danger" onClick={clearDraft}>Clear Draft</button>
                             </div>
                         </div>
+                                    )}
 
+                                    {selectedFeature === 'export' && (
                         <div className="panel">
                             <h3>Export Options</h3>
                             <label style={{display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 8}}>
@@ -5834,23 +6095,51 @@
                                 </p>
                             )}
                         </div>
-
-                        {!isAnimating ? (
-                            <button className="btn btn-primary" style={{padding:15, fontSize:'1.1em'}} onClick={startAnimation} disabled={polyPoints.length < 3}>Animate & Record</button>
-                        ) : (
-                            <button className="btn btn-danger" style={{padding:15, fontSize:'1.1em'}} onClick={stopEverything}>Stop</button>
-                        )}
-
-                        <div style={{textAlign:'center', color:'#666', fontSize:'0.8rem'}}>{status}</div>
-
-                        {recordedVideo && (
-                            <div className="panel" style={{textAlign:'center', borderColor:'#00ff99'}}>
-                                <h3 style={{color:'#00ff99', margin:0}}>Result Ready</h3>
-                                <video controls src={recordedVideo} style={{width:'100%', marginTop:10, borderRadius:4}} />
-                                <a href={recordedVideo} download="lipsync_3d.webm" className="btn btn-primary" style={{display:'block', marginTop:10, textDecoration:'none'}}>Download</a>
-                            </div>
+                                    )}
+                                </div>
+                            </>
                         )}
                     </div>
+
+                    {/* Main Action Button - Fixed at bottom center */}
+                    {!isAnimating ? (
+                        <button className="btn btn-primary main-action-btn" onClick={startAnimation} disabled={polyPoints.length < 3}>
+                            Animate & Record
+                        </button>
+                    ) : (
+                        <button className="btn btn-danger main-action-btn" onClick={stopEverything}>
+                            Stop
+                        </button>
+                    )}
+
+                    {/* Result Video - Shows when ready */}
+                    {recordedVideo && (
+                        <div
+                            style={{
+                                position: 'fixed',
+                                bottom: '90px',
+                                right: '20px',
+                                zIndex: 200,
+                                background: 'rgba(20, 20, 20, 0.98)',
+                                backdropFilter: 'blur(10px)',
+                                padding: '20px',
+                                borderRadius: '12px',
+                                border: '2px solid #00ff99',
+                                maxWidth: '350px'
+                            }}
+                        >
+                            <h3 style={{color:'#00ff99', margin:'0 0 10px 0', fontSize: '1rem'}}>Result Ready</h3>
+                            <video controls src={recordedVideo} style={{width:'100%', borderRadius: '8px', marginBottom: '10px'}} />
+                            <a
+                                href={recordedVideo}
+                                download="lipsync_3d.webm"
+                                className="btn btn-primary"
+                                style={{display:'block', textDecoration:'none', textAlign: 'center'}}
+                            >
+                                Download Video
+                            </a>
+                        </div>
+                    )}
 
                     {/* Toast Notification Container */}
                     <div className="toast-container" role="region" aria-live="polite" aria-label="Notifications">
