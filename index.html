@@ -709,6 +709,21 @@
             const panStartRef = React.useRef(null);
             const panOffsetStartRef = React.useRef(null);
 
+            // Refs for zoom/pan to avoid stale closures in event handlers
+            const isZoomedRef = React.useRef(false);
+            const zoomScaleRef = React.useRef(1.0);
+            const panOffsetRef = React.useRef({ x: 0, y: 0 });
+
+            // Keep refs in sync with state
+            React.useEffect(() => {
+                isZoomedRef.current = isZoomed;
+                zoomScaleRef.current = zoomScale;
+                panOffsetRef.current = panOffset;
+            }, [isZoomed, zoomScale, panOffset]);
+
+            // Track currently selected zone for deletion
+            const [selectedZone, setSelectedZone] = React.useState(null);
+
             // Undo/Redo system
             const [history, setHistory] = React.useState([]);
             const [historyIndex, setHistoryIndex] = React.useState(-1);
@@ -1439,17 +1454,22 @@
                 }
 
                 // If zoomed, transform coordinates back to original image space
-                if (isZoomed && zoomScale > 1.0) {
+                // Use refs to avoid stale closures in event handlers
+                const currentZoomed = isZoomedRef.current;
+                const currentZoomScale = zoomScaleRef.current;
+                const currentPanOffset = panOffsetRef.current;
+
+                if (currentZoomed && currentZoomScale > 1.0) {
                     const imageWidth = canvasRef.current.width;
                     const imageHeight = canvasRef.current.height;
 
                     // Calculate the zoomed viewport dimensions
-                    const viewportWidth = imageWidth / zoomScale;
-                    const viewportHeight = imageHeight / zoomScale;
+                    const viewportWidth = imageWidth / currentZoomScale;
+                    const viewportHeight = imageHeight / currentZoomScale;
 
                     // Transform canvas coordinates to image coordinates
-                    const imageX = (canvasX / imageWidth) * viewportWidth + panOffset.x;
-                    const imageY = (canvasY / imageHeight) * viewportHeight + panOffset.y;
+                    const imageX = (canvasX / imageWidth) * viewportWidth + currentPanOffset.x;
+                    const imageY = (canvasY / imageHeight) * viewportHeight + currentPanOffset.y;
 
                     return { x: imageX, y: imageY };
                 }
@@ -1579,9 +1599,10 @@
 
             // Get hit detection radius adjusted for zoom level
             // When zoomed in, we need larger hit areas in image space to match the visually larger anchors
+            // Uses refs to avoid stale closures in event handlers
             const getHitRadius = (baseRadius) => {
-                if (isZoomed && zoomScale > 1.0) {
-                    return baseRadius * zoomScale;
+                if (isZoomedRef.current && zoomScaleRef.current > 1.0) {
+                    return baseRadius * zoomScaleRef.current;
                 }
                 return baseRadius;
             };
@@ -1590,8 +1611,8 @@
             // When zoomed in, anchor points need to be drawn larger in canvas space
             // to maintain consistent screen size
             const getAnchorRadius = (baseRadius = 12) => {
-                if (isZoomed && zoomScale > 1.0) {
-                    return baseRadius * zoomScale;
+                if (isZoomedRef.current && zoomScaleRef.current > 1.0) {
+                    return baseRadius * zoomScaleRef.current;
                 }
                 return baseRadius;
             };
@@ -1702,6 +1723,52 @@
                 }
             };
 
+            // Delete the selected zone (eye, brow, mouth, lipLine)
+            const deleteSelectedZone = () => {
+                if (!selectedZone) {
+                    setStatus("No zone selected to delete.");
+                    return;
+                }
+
+                const zoneLabels = {
+                    'mouth': 'Mouth',
+                    'lipLine': 'Lip Line',
+                    'leftEye': 'Left Eye',
+                    'rightEye': 'Right Eye',
+                    'leftBrow': 'Left Eyebrow',
+                    'rightBrow': 'Right Eyebrow'
+                };
+
+                // Clear the zone by setting empty points
+                if (selectedZone === 'mouth') {
+                    polyPointsRef.current = [];
+                    setPolyPoints([]);
+                    // Also clear lip line when mouth is deleted
+                    lipLinePointsRef.current = [];
+                    setLipLinePoints([]);
+                } else if (selectedZone === 'lipLine') {
+                    lipLinePointsRef.current = [];
+                    setLipLinePoints([]);
+                } else if (selectedZone === 'leftEye') {
+                    leftEyePointsRef.current = [];
+                    setLeftEyePoints([]);
+                } else if (selectedZone === 'rightEye') {
+                    rightEyePointsRef.current = [];
+                    setRightEyePoints([]);
+                } else if (selectedZone === 'leftBrow') {
+                    leftBrowPointsRef.current = [];
+                    setLeftBrowPoints([]);
+                } else if (selectedZone === 'rightBrow') {
+                    rightBrowPointsRef.current = [];
+                    setRightBrowPoints([]);
+                }
+
+                setStatus(`${zoneLabels[selectedZone] || selectedZone} deleted.`);
+                setSelectedZone(null);
+                saveToHistory();
+                drawOverlay();
+            };
+
             const handleMouseDown = (e) => {
                 if (isAnimating || !image) return;
 
@@ -1753,6 +1820,9 @@
 
                 // Check if we clicked on a polygon or point
                 if (clicked) {
+                    // Set the selected zone for potential deletion
+                    setSelectedZone(clicked.type);
+
                     if (clicked.pointIndex !== -1) {
                         // Clicked on a point - start dragging it
                         setDraggedPointIndex(clicked.pointIndex);
@@ -1768,8 +1838,11 @@
                     return;
                 }
 
-                // No polygon clicked - start panning if zoomed
-                if (zoomScale > 1.0) {
+                // Clicked on empty area - clear selection
+                setSelectedZone(null);
+
+                // No polygon clicked - start panning if zoomed (use ref for zoom)
+                if (zoomScaleRef.current > 1.0) {
                     setIsPanning(true);
                     const rect = canvasRef.current.getBoundingClientRect();
                     const scaleX = canvasRef.current.width / rect.width;
@@ -1785,7 +1858,7 @@
                             y: (e.clientY - rect.top) * scaleY
                         };
                     }
-                    panOffsetStartRef.current = { ...panOffset };
+                    panOffsetStartRef.current = { ...panOffsetRef.current };
                 }
             };
 
@@ -1812,8 +1885,9 @@
 
                     const imageWidth = canvasRef.current.width;
                     const imageHeight = canvasRef.current.height;
-                    const viewportWidth = imageWidth / zoomScale;
-                    const viewportHeight = imageHeight / zoomScale;
+                    const currentZoom = zoomScaleRef.current;
+                    const viewportWidth = imageWidth / currentZoom;
+                    const viewportHeight = imageHeight / currentZoom;
 
                     // Convert canvas pixel movement to image space movement
                     const imageDx = (dx / imageWidth) * viewportWidth;
@@ -4381,7 +4455,15 @@
                             <div className="btn-row" style={{alignItems: 'center'}}>
                                 <select
                                     value={manualDrawFeature}
-                                    onChange={e => setManualDrawFeature(e.target.value)}
+                                    onChange={e => {
+                                        setManualDrawFeature(e.target.value);
+                                        // Auto-enter placement mode when user selects from dropdown
+                                        // Only if image is loaded and not already in draw mode
+                                        if (image && !isAnimating && !manualDrawMode) {
+                                            setManualDrawMode(true);
+                                            setShapePreviewPos(null);
+                                        }
+                                    }}
                                     disabled={!image || isAnimating || manualDrawMode}
                                     style={{
                                         flex: 1,
@@ -4414,11 +4496,29 @@
                                     }}
                                     disabled={!image || isAnimating}
                                     title="Click to place a shape, then drag corners to resize"
-                                    style={{minWidth: '100px'}}
+                                    style={{minWidth: '80px'}}
                                 >
                                     {manualDrawMode ? 'Cancel' : 'Drop'}
                                 </button>
+                                <button
+                                    className="btn"
+                                    onClick={deleteSelectedZone}
+                                    disabled={!image || isAnimating || !selectedZone}
+                                    title={selectedZone ? `Delete ${selectedZone}` : "Select a zone to delete"}
+                                    style={{
+                                        minWidth: '60px',
+                                        background: selectedZone ? '#661111' : '#2a2a2a',
+                                        color: selectedZone ? '#ff6666' : '#666'
+                                    }}
+                                >
+                                    Delete
+                                </button>
                             </div>
+                            {selectedZone && !manualDrawMode && (
+                                <p style={{fontSize: '0.75rem', color: '#ff6666', marginTop: 8}}>
+                                    Selected: {selectedZone}. Click Delete to remove.
+                                </p>
+                            )}
                             {manualDrawMode && (
                                 <p style={{fontSize: '0.75rem', color: '#ff9900', marginTop: 8}}>
                                     Click anywhere to place the {manualDrawFeature} shape.
