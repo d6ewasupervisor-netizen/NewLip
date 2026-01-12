@@ -384,6 +384,464 @@
         }
 
         /* ========================================
+           ENHANCED VISUAL FEEDBACK & ACCESSIBILITY
+           ======================================== */
+
+        /* Ripple effect for buttons */
+        @keyframes ripple {
+            0% {
+                transform: scale(0);
+                opacity: 0.6;
+            }
+            100% {
+                transform: scale(4);
+                opacity: 0;
+            }
+        }
+
+        .btn, .tab {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::after, .tab::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            background: rgba(255, 0, 255, 0.5);
+            border-radius: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            pointer-events: none;
+        }
+
+        .btn:active::after, .tab:active::after {
+            animation: ripple 0.6s ease-out;
+        }
+
+        /* Toast notification system */
+        .toast-container {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+            max-width: 90vw;
+        }
+
+        .toast {
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(10px);
+            color: #fff;
+            padding: 16px 24px;
+            border-radius: 12px;
+            border: 1px solid #333;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+            max-width: 500px;
+            animation: slideUp 0.3s ease-out;
+            pointer-events: auto;
+        }
+
+        .toast.toast-success {
+            border-left: 4px solid #4caf50;
+        }
+
+        .toast.toast-error {
+            border-left: 4px solid #d32f2f;
+        }
+
+        .toast.toast-info {
+            border-left: 4px solid var(--accent);
+        }
+
+        .toast.toast-warning {
+            border-left: 4px solid #ff9800;
+        }
+
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .toast-content {
+            flex: 1;
+            font-size: 0.9rem;
+        }
+
+        .toast-title {
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .toast-message {
+            color: #aaa;
+            font-size: 0.85rem;
+        }
+
+        .toast-close {
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 20px;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: 0.2s;
+        }
+
+        .toast-close:hover {
+            background: #333;
+            color: #fff;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            to {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+        }
+
+        .toast.toast-exit {
+            animation: slideOut 0.3s ease-out forwards;
+        }
+
+        /* Enhanced loading spinner with better visibility */
+        .spinner-large {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #333;
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .spinner-inline {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #666;
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        /* Progress bar for long operations */
+        .progress-bar-container {
+            width: 100%;
+            height: 4px;
+            background: #2a2a2a;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #ff00ff, #d600d6);
+            transition: width 0.3s ease;
+            border-radius: 2px;
+        }
+
+        .progress-bar-indeterminate {
+            width: 30%;
+            animation: progressSlide 1.5s ease-in-out infinite;
+        }
+
+        @keyframes progressSlide {
+            0% {
+                transform: translateX(-100%);
+            }
+            100% {
+                transform: translateX(400%);
+            }
+        }
+
+        /* Enhanced contrast for outdoor readability */
+        @media (prefers-contrast: high) {
+            :root {
+                --accent: #ff00ff;
+                --bg: #000;
+                --panel: #000;
+                --text: #fff;
+            }
+
+            .btn {
+                border: 2px solid #fff;
+            }
+
+            .tab {
+                border: 1px solid #666;
+            }
+        }
+
+        /* Accessibility: Reduced motion support */
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+
+            .btn:active,
+            .tab:active,
+            .preview-btn-floating:active {
+                transform: none;
+            }
+
+            .spinner,
+            .spinner-large,
+            .spinner-inline {
+                animation: none;
+                border-top-color: var(--accent);
+                border-right-color: var(--accent);
+            }
+        }
+
+        /* Enhanced focus indicators for keyboard navigation */
+        *:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 3px;
+            z-index: 10;
+        }
+
+        .btn:focus-visible,
+        .tab:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        input[type="range"]:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 4px;
+        }
+
+        /* Skip to content link for screen readers */
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 0;
+            background: var(--accent);
+            color: #fff;
+            padding: 8px 16px;
+            text-decoration: none;
+            border-radius: 0 0 4px 0;
+            z-index: 100;
+        }
+
+        .skip-link:focus {
+            top: 0;
+        }
+
+        /* Status bar for persistent feedback */
+        .status-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(10px);
+            color: #aaa;
+            padding: 12px 20px;
+            border-top: 1px solid #333;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            z-index: 50;
+            font-size: 0.85rem;
+        }
+
+        .status-bar-content {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+        }
+
+        .status-bar.status-error {
+            background: rgba(211, 47, 47, 0.15);
+            border-top-color: #d32f2f;
+            color: #ff6b6b;
+        }
+
+        .status-bar.status-success {
+            background: rgba(76, 175, 80, 0.15);
+            border-top-color: #4caf50;
+            color: #81c784;
+        }
+
+        .status-bar.status-loading {
+            background: rgba(255, 0, 255, 0.1);
+            border-top-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* Breadcrumb navigation */
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .breadcrumb-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .breadcrumb-separator {
+            color: #555;
+        }
+
+        .breadcrumb-item.active {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        /* Input validation states */
+        input:invalid,
+        textarea:invalid {
+            border-color: #d32f2f;
+        }
+
+        input:valid,
+        textarea:valid {
+            border-color: #4caf50;
+        }
+
+        .input-error-message {
+            color: #ff6b6b;
+            font-size: 0.75rem;
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .input-success-message {
+            color: #81c784;
+            font-size: 0.75rem;
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Floating action button enhancements */
+        .fab-group {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 100;
+        }
+
+        .fab {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--accent);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            transition: transform 0.2s, background 0.2s, box-shadow 0.2s;
+        }
+
+        .fab:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+        }
+
+        .fab:active {
+            transform: scale(0.95);
+        }
+
+        .fab-secondary {
+            width: 48px;
+            height: 48px;
+            background: #2a2a2a;
+        }
+
+        /* Better touch feedback with shadow */
+        .btn:active,
+        .tab:active {
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Loading overlay for better UX during processing */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            color: #fff;
+        }
+
+        .loading-overlay-content {
+            text-align: center;
+            max-width: 80%;
+        }
+
+        .loading-overlay-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .loading-overlay-message {
+            font-size: 0.9rem;
+            color: #aaa;
+            margin-bottom: 20px;
+        }
+
+        /* ========================================
            RESPONSIVE BREAKPOINTS
            ======================================== */
 
@@ -799,6 +1257,14 @@
             const [exportWithAudio, setExportWithAudio] = React.useState(true);
             const [exportWithBackground, setExportWithBackground] = React.useState(true);
 
+            // Toast notifications for better UX feedback
+            const [toasts, setToasts] = React.useState([]);
+            const toastIdRef = React.useRef(0);
+
+            // Interruption management - track if user left/returned to app
+            const [appVisible, setAppVisible] = React.useState(true);
+            const [lastInteractionTime, setLastInteractionTime] = React.useState(Date.now());
+
             const canvasRef = React.useRef(null);
             const imageRef = React.useRef(null);
             const audioRef = React.useRef(null);
@@ -824,6 +1290,95 @@
                     if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y;
                 });
                 return { x: Math.floor(minX), y: Math.floor(minY), width: Math.ceil(maxX - minX), height: Math.ceil(maxY - minY) };
+            };
+
+            // ========================================
+            // ENHANCED UX UTILITIES
+            // ========================================
+
+            // Haptic feedback for mobile devices
+            const triggerHaptic = (intensity = 'medium') => {
+                if ('vibrate' in navigator) {
+                    const patterns = {
+                        light: 10,
+                        medium: 20,
+                        heavy: 50,
+                        success: [10, 50, 10],
+                        error: [50, 100, 50],
+                        warning: [20, 50, 20]
+                    };
+                    navigator.vibrate(patterns[intensity] || patterns.medium);
+                }
+            };
+
+            // Toast notification system
+            const showToast = (title, message, type = 'info', duration = 4000) => {
+                const id = toastIdRef.current++;
+                const newToast = { id, title, message, type, duration };
+
+                setToasts(prev => [...prev, newToast]);
+
+                // Haptic feedback based on toast type
+                if (type === 'success') triggerHaptic('success');
+                else if (type === 'error') triggerHaptic('error');
+                else if (type === 'warning') triggerHaptic('warning');
+
+                // Auto-dismiss after duration
+                if (duration > 0) {
+                    setTimeout(() => {
+                        removeToast(id);
+                    }, duration);
+                }
+
+                return id;
+            };
+
+            const removeToast = (id) => {
+                setToasts(prev => prev.map(toast =>
+                    toast.id === id ? { ...toast, exiting: true } : toast
+                ));
+                setTimeout(() => {
+                    setToasts(prev => prev.filter(toast => toast.id !== id));
+                }, 300);
+            };
+
+            // Enhanced status setter with toast notifications
+            const setStatusWithToast = (message, type = 'info') => {
+                setStatus(message);
+
+                // Map status messages to appropriate toast notifications
+                if (type === 'success' || message.toLowerCase().includes('complete') || message.toLowerCase().includes('success')) {
+                    showToast('Success', message, 'success');
+                } else if (type === 'error' || message.toLowerCase().includes('error') || message.toLowerCase().includes('failed')) {
+                    showToast('Error', message, 'error');
+                } else if (type === 'warning' || message.toLowerCase().includes('warning')) {
+                    showToast('Notice', message, 'warning');
+                } else {
+                    // Don't show toast for regular info messages, just update status bar
+                }
+            };
+
+            // Form validation utilities
+            const validateInput = (value, rules) => {
+                const errors = [];
+
+                if (rules.required && (!value || value.trim() === '')) {
+                    errors.push('This field is required');
+                }
+
+                if (rules.minLength && value.length < rules.minLength) {
+                    errors.push(`Minimum ${rules.minLength} characters required`);
+                }
+
+                if (rules.maxLength && value.length > rules.maxLength) {
+                    errors.push(`Maximum ${rules.maxLength} characters allowed`);
+                }
+
+                if (rules.pattern && !rules.pattern.test(value)) {
+                    errors.push(rules.patternMessage || 'Invalid format');
+                }
+
+                return { valid: errors.length === 0, errors };
             };
 
             // Calculate anatomically correct eyelid and eyebrow positions relative to eyeball
@@ -1207,6 +1762,89 @@
             React.useEffect(() => { bgRemovalEnabledRef.current = bgRemovalEnabled; }, [bgRemovalEnabled]);
             React.useEffect(() => { backgroundTypeRef.current = backgroundType; }, [backgroundType]);
             React.useEffect(() => { backgroundColorRef.current = backgroundColor; }, [backgroundColor]);
+
+            // ========================================
+            // INTERRUPTION MANAGEMENT
+            // ========================================
+
+            // Handle visibility changes (user switching apps/tabs)
+            React.useEffect(() => {
+                const handleVisibilityChange = () => {
+                    const isVisible = document.visibilityState === 'visible';
+                    setAppVisible(isVisible);
+
+                    if (isVisible) {
+                        // User returned to the app
+                        const timeAway = Date.now() - lastInteractionTime;
+
+                        // If user was away for more than 5 minutes, show welcome back message
+                        if (timeAway > 300000) {
+                            showToast('Welcome Back', 'Your work has been auto-saved', 'info', 3000);
+                        }
+
+                        // Resume any paused background videos
+                        if (backgroundVideoRef.current && backgroundType === 'video') {
+                            backgroundVideoRef.current.play().catch(() => {});
+                        }
+                    } else {
+                        // User left the app - save current timestamp
+                        setLastInteractionTime(Date.now());
+
+                        // Pause background video to save resources
+                        if (backgroundVideoRef.current && backgroundType === 'video') {
+                            backgroundVideoRef.current.pause();
+                        }
+
+                        // Auto-save current state
+                        if (image && polyPoints.length > 0) {
+                            try {
+                                const draft = {
+                                    image: image.src,
+                                    polyPoints,
+                                    leftEyePoints,
+                                    rightEyePoints,
+                                    leftBrowPoints,
+                                    rightBrowPoints,
+                                    lipLinePoints,
+                                    timestamp: Date.now()
+                                };
+                                localStorage.setItem(draftKey, JSON.stringify(draft));
+                            } catch (e) {
+                                console.error('Failed to auto-save:', e);
+                            }
+                        }
+                    }
+                };
+
+                const handleBeforeUnload = (e) => {
+                    // Auto-save before user closes the tab
+                    if (image && polyPoints.length > 0 && !isAnimating) {
+                        try {
+                            const draft = {
+                                image: image.src,
+                                polyPoints,
+                                leftEyePoints,
+                                rightEyePoints,
+                                leftBrowPoints,
+                                rightBrowPoints,
+                                lipLinePoints,
+                                timestamp: Date.now()
+                            };
+                            localStorage.setItem(draftKey, JSON.stringify(draft));
+                        } catch (err) {
+                            console.error('Failed to save before unload:', err);
+                        }
+                    }
+                };
+
+                document.addEventListener('visibilitychange', handleVisibilityChange);
+                window.addEventListener('beforeunload', handleBeforeUnload);
+
+                return () => {
+                    document.removeEventListener('visibilitychange', handleVisibilityChange);
+                    window.removeEventListener('beforeunload', handleBeforeUnload);
+                };
+            }, [lastInteractionTime, image, polyPoints, leftEyePoints, rightEyePoints, leftBrowPoints, rightBrowPoints, lipLinePoints, isAnimating, backgroundType]);
 
             // Keyboard event listeners for modifier keys
             React.useEffect(() => {
@@ -4407,8 +5045,34 @@
                 <div className="layout">
                     <div
                         className="stage"
+                        role="region"
+                        aria-label="Animation canvas and preview area"
                     >
-                        {!image && <div className="upload-zone" onClick={()=>document.getElementById('imgIn').click()}><h2>Upload Photo</h2><p>High Resolution Recommended</p><input id="imgIn" type="file" onChange={handleImageUpload} style={{display:'none'}} accept="image/*" /></div>}
+                        {!image && (
+                            <div
+                                className="upload-zone"
+                                onClick={()=>document.getElementById('imgIn').click()}
+                                role="button"
+                                tabIndex={0}
+                                aria-label="Upload photo to begin"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        document.getElementById('imgIn').click();
+                                    }
+                                }}
+                            >
+                                <h2>Upload Photo</h2>
+                                <p>High Resolution Recommended</p>
+                                <input
+                                    id="imgIn"
+                                    type="file"
+                                    onChange={handleImageUpload}
+                                    style={{display:'none'}}
+                                    accept="image/*"
+                                    aria-label="Photo file upload"
+                                />
+                            </div>
+                        )}
                         <canvas
                             ref={canvasRef}
                             style={{opacity: image?1:0, touchAction: 'none'}}
@@ -4421,13 +5085,22 @@
                             onTouchMove={handleTouchMove}
                             onTouchEnd={handleTouchEnd}
                             onDoubleClick={handleDoubleClick}
+                            role="img"
+                            aria-label={image ? "Interactive canvas for adjusting facial features and anchor points" : "Canvas area - upload an image to begin"}
+                            tabIndex={image ? 0 : -1}
                         />
-                        {isDetecting && <div className="overlay-msg"><div className="spinner"></div><span>Scanning Face...</span></div>}
+                        {isDetecting && (
+                            <div className="overlay-msg" role="alert" aria-live="assertive">
+                                <div className="spinner" aria-hidden="true"></div>
+                                <span>Scanning Face...</span>
+                            </div>
+                        )}
                         {image && polyPoints.length >= 3 && !isAnimating && (
                             <button
                                 className={`preview-btn-floating ${isPreviewing ? 'is-playing' : ''}`}
                                 onClick={isPreviewing ? stopPreview : startPreview}
                                 title={isPreviewing ? 'Stop Preview' : 'Preview Animation'}
+                                aria-label={isPreviewing ? 'Stop animation preview' : 'Preview animation'}
                             >
                                 {isPreviewing ? (
                                     <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -4443,12 +5116,38 @@
                         )}
                     </div>
 
-                    <div className="controls">
+                    <div className="controls" id="main-controls" role="main" aria-label="Main application controls">
                         <h1>Lip Sync Pro</h1>
+
+                        {/* Breadcrumb Navigation */}
+                        <nav className="breadcrumb" aria-label="Application workflow">
+                            <div className={`breadcrumb-item ${!image ? 'active' : ''}`}>
+                                <span>1. Upload</span>
+                            </div>
+                            <span className="breadcrumb-separator" aria-hidden="true">›</span>
+                            <div className={`breadcrumb-item ${image && polyPoints.length === 0 ? 'active' : ''}`}>
+                                <span>2. Setup</span>
+                            </div>
+                            <span className="breadcrumb-separator" aria-hidden="true">›</span>
+                            <div className={`breadcrumb-item ${image && polyPoints.length > 0 && !audioUrl ? 'active' : ''}`}>
+                                <span>3. Audio</span>
+                            </div>
+                            <span className="breadcrumb-separator" aria-hidden="true">›</span>
+                            <div className={`breadcrumb-item ${image && polyPoints.length > 0 && audioUrl && !isAnimating ? 'active' : ''}`}>
+                                <span>4. Animate</span>
+                            </div>
+                        </nav>
+
                         <div className="panel">
-                            <h3>Setup</h3>
+                            <h3 id="setup-section">Setup</h3>
                             <div className="btn-row" style={{marginBottom: 10}}>
-                                <button className="btn btn-danger" onClick={resetAll}>Reset All</button>
+                                <button
+                                    className="btn btn-danger"
+                                    onClick={resetAll}
+                                    aria-label="Reset all settings and start over"
+                                >
+                                    Reset All
+                                </button>
                             </div>
 
                             <h3 style={{marginTop: 10, fontSize: '0.9rem'}}>Add Selection Zone</h3>
@@ -4733,7 +5432,19 @@
 
                             {audioSource === 'tts' && (
                                 <div>
-                                    <textarea value={text} onChange={e=>setText(e.target.value)} style={{width:'100%', background:'#1a1a1a', color:'#fff', border:'none', padding:10, borderRadius:4, minHeight:60}} />
+                                    <label htmlFor="tts-text" style={{fontSize: '0.8rem', color: '#aaa', marginBottom: 5, display: 'block'}}>
+                                        Text to Speech
+                                    </label>
+                                    <textarea
+                                        id="tts-text"
+                                        value={text}
+                                        onChange={e=>setText(e.target.value)}
+                                        style={{width:'100%', background:'#1a1a1a', color:'#fff', border:'none', padding:10, borderRadius:4, minHeight:60}}
+                                        placeholder="Enter text for text-to-speech conversion..."
+                                        aria-label="Text to speech input"
+                                        autoComplete="off"
+                                        spellCheck="true"
+                                    />
 
                                     <h3 style={{marginTop: 15, fontSize: '0.8rem'}}>Voice Customization</h3>
 
@@ -5140,6 +5851,59 @@
                             </div>
                         )}
                     </div>
+
+                    {/* Toast Notification Container */}
+                    <div className="toast-container" role="region" aria-live="polite" aria-label="Notifications">
+                        {toasts.map(toast => (
+                            <div
+                                key={toast.id}
+                                className={`toast toast-${toast.type} ${toast.exiting ? 'toast-exit' : ''}`}
+                                role="alert"
+                                aria-atomic="true"
+                            >
+                                <span className="toast-icon" aria-hidden="true">
+                                    {toast.type === 'success' && '✓'}
+                                    {toast.type === 'error' && '✕'}
+                                    {toast.type === 'warning' && '⚠'}
+                                    {toast.type === 'info' && 'ℹ'}
+                                </span>
+                                <div className="toast-content">
+                                    <div className="toast-title">{toast.title}</div>
+                                    <div className="toast-message">{toast.message}</div>
+                                </div>
+                                <button
+                                    className="toast-close"
+                                    onClick={() => removeToast(toast.id)}
+                                    aria-label="Close notification"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Enhanced Status Bar */}
+                    <div
+                        className={`status-bar ${
+                            status.toLowerCase().includes('error') || status.toLowerCase().includes('failed') ? 'status-error' :
+                            status.toLowerCase().includes('success') || status.toLowerCase().includes('complete') ? 'status-success' :
+                            isAnimating || isDetecting || isRemovingBg ? 'status-loading' : ''
+                        }`}
+                        role="status"
+                        aria-live="polite"
+                    >
+                        <div className="status-bar-content">
+                            {(isAnimating || isDetecting || isRemovingBg) && (
+                                <div className="spinner-inline" aria-hidden="true"></div>
+                            )}
+                            <span>{status}</span>
+                        </div>
+                    </div>
+
+                    {/* Skip to main content link for accessibility */}
+                    <a href="#main-controls" className="skip-link">
+                        Skip to main controls
+                    </a>
                 </div>
             );
         };
