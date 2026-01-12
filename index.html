@@ -30,7 +30,7 @@
             background: var(--bg);
             color: var(--text);
             margin: 0;
-            padding: 20px;
+            padding: 8px;
             height: 100vh;
             overflow: hidden;
             /* Prevent pull-to-refresh on mobile */
@@ -41,9 +41,8 @@
         .layout {
             display: grid;
             grid-template-columns: 1fr;
-            gap: 20px;
-            height: 95vh;
-            max-width: 1900px;
+            gap: 10px;
+            height: 98vh;
             margin: 0 auto;
         }
 
@@ -56,7 +55,7 @@
             justify-content: center;
             position: relative;
             overflow: hidden;
-            min-height: 300px;
+            min-height: 200px;
         }
 
         canvas {
@@ -1110,11 +1109,11 @@
         /* Mobile portrait (480px - 639px) */
         @media (max-width: 639px) {
             .controls {
-                max-height: 55vh;
+                max-height: 50vh;
             }
 
             .stage {
-                height: 35vh;
+                height: 45vh;
                 min-height: 200px;
             }
 
@@ -1146,12 +1145,12 @@
 
             .controls {
                 padding: 12px;
-                max-height: 60vh;
+                max-height: 55vh;
                 gap: 8px;
             }
 
             .stage {
-                height: 30vh;
+                height: 40vh;
                 min-height: 180px;
                 border-radius: 6px;
             }
@@ -1206,17 +1205,17 @@
         @media (max-width: 767px) and (orientation: landscape) {
             .layout {
                 grid-template-columns: 1fr 280px;
-                height: 90vh;
+                height: 95vh;
             }
 
             .controls {
                 order: 2;
-                max-height: 90vh;
+                max-height: 95vh;
             }
 
             .stage {
                 order: 1;
-                height: 90vh;
+                height: 95vh;
             }
         }
 
