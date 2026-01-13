@@ -30,7 +30,7 @@
             background: var(--bg);
             color: var(--text);
             margin: 0;
-            padding: 8px;
+            padding: 0;
             height: 100vh;
             overflow: hidden;
             /* Prevent pull-to-refresh on mobile */
@@ -39,22 +39,25 @@
         }
 
         .layout {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 10px;
-            height: 98vh;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
             margin: 0 auto;
+            padding-top: 60px; /* Space for fixed menu bar */
+            padding-bottom: 50px; /* Space for fixed status bar */
         }
 
         .stage {
             background: #000;
-            border-radius: 12px;
-            border: 1px solid #333;
+            border-radius: 0;
+            border: none;
             display: flex;
             align-items: center;
             justify-content: center;
             position: relative;
             overflow: hidden;
+            flex: 1;
+            width: 100%;
             min-height: 200px;
         }
 
@@ -841,21 +844,22 @@
         }
 
         /* ========================================
-           FLOATING FEATURES BANNER
+           FIXED TOP MENU BAR
            ======================================== */
 
         .floating-banner {
             position: fixed;
-            top: 20px;
-            left: 20px;
+            top: 0;
+            left: 0;
+            right: 0;
             background: rgba(20, 20, 20, 0.98);
             backdrop-filter: blur(10px);
-            border: 1px solid #333;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+            border: none;
+            border-bottom: 1px solid #333;
+            border-radius: 0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
             z-index: 200;
-            max-width: 450px;
-            min-width: 350px;
+            width: 100%;
             max-height: 80vh;
             display: flex;
             flex-direction: column;
@@ -873,13 +877,8 @@
             padding: 16px 20px;
             background: linear-gradient(135deg, #1a1a1a 0%, #141414 100%);
             border-bottom: 1px solid #333;
-            border-radius: 12px 12px 0 0;
-            cursor: move;
+            border-radius: 0;
             gap: 12px;
-        }
-
-        .banner-header:active {
-            cursor: grabbing;
         }
 
         .banner-title {
@@ -1000,16 +999,13 @@
         /* Large tablets and small desktops (1024px - 1199px) */
         @media (max-width: 1199px) {
             .floating-banner {
-                max-width: 400px;
-                min-width: 320px;
+                /* Full width at top - no changes needed */
             }
         }
 
         /* Tablets portrait and landscape (768px - 1023px) */
         @media (max-width: 1023px) {
             .floating-banner {
-                max-width: 90vw;
-                min-width: 300px;
                 max-height: 70vh;
             }
 
@@ -1021,20 +1017,16 @@
         /* Mobile landscape and large phones (640px - 767px) */
         @media (max-width: 767px) {
             body {
-                padding: 10px;
+                padding: 0;
             }
 
             .layout {
-                gap: 10px;
-                height: auto;
+                padding-top: 55px;
+                padding-bottom: 48px;
             }
 
             .floating-banner {
-                top: 10px;
-                left: 10px;
-                right: 10px;
-                min-width: auto;
-                max-width: calc(100vw - 20px);
+                /* Stays at top: 0, left: 0, right: 0 */
                 max-height: 60vh;
             }
 
@@ -1113,7 +1105,7 @@
             }
 
             .stage {
-                height: 75vh;
+                /* Uses flex: 1 from main styles */
                 min-height: 200px;
             }
 
@@ -1136,11 +1128,12 @@
         /* Small mobile devices (320px - 479px) */
         @media (max-width: 479px) {
             body {
-                padding: 8px;
+                padding: 0;
             }
 
             .layout {
-                gap: 8px;
+                padding-top: 50px;
+                padding-bottom: 45px;
             }
 
             .controls {
@@ -1150,9 +1143,8 @@
             }
 
             .stage {
-                height: 70vh;
+                /* Uses flex: 1 from main styles */
                 min-height: 180px;
-                border-radius: 6px;
             }
 
             .panel {
@@ -1204,8 +1196,8 @@
         /* Orientation-specific styles */
         @media (max-width: 767px) and (orientation: landscape) {
             .layout {
-                grid-template-columns: 1fr 280px;
-                height: 95vh;
+                /* Keep flex layout for consistency */
+                height: 100vh;
             }
 
             .controls {
@@ -1411,10 +1403,10 @@
             const [toasts, setToasts] = React.useState([]);
             const toastIdRef = React.useRef(0);
 
-            // Floating banner state
+            // Top menu bar state
             const [selectedFeature, setSelectedFeature] = React.useState('setup');
-            const [bannerCollapsed, setBannerCollapsed] = React.useState(false);
-            const [bannerPosition, setBannerPosition] = React.useState({ x: 20, y: 20 });
+            const [bannerCollapsed, setBannerCollapsed] = React.useState(true);
+            const [bannerPosition, setBannerPosition] = React.useState({ x: 0, y: 0 });
             const [isDraggingBanner, setIsDraggingBanner] = React.useState(false);
             const bannerDragStartRef = React.useRef(null);
 
@@ -5324,15 +5316,11 @@
                         )}
                     </div>
 
-                    {/* Floating Features Banner */}
+                    {/* Fixed Top Menu Bar */}
                     <div
                         className={`floating-banner ${bannerCollapsed ? 'collapsed' : ''}`}
-                        style={{
-                            left: `${bannerPosition.x}px`,
-                            top: `${bannerPosition.y}px`
-                        }}
                     >
-                        <div className="banner-header" onMouseDown={handleBannerMouseDown}>
+                        <div className="banner-header">
                             <div className="banner-title">
                                 <span>⚙️</span>
                                 <span>Features</span>
@@ -6184,7 +6172,7 @@
                             {(isAnimating || isDetecting || isRemovingBg) && (
                                 <div className="spinner-inline" aria-hidden="true"></div>
                             )}
-                            <span>{status}</span>
+                            <span>{!image ? '👆 Click on the area above to load a photo and get started' : status}</span>
                         </div>
                     </div>
 
